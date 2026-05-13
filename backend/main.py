@@ -1,8 +1,6 @@
-import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routes.process import router as process_router
-from routes.history import router as history_router
 
 app = FastAPI(title="Audio Transcriber and Summariser")
 
@@ -15,7 +13,6 @@ app.add_middleware(
 )
 
 app.include_router(process_router)
-app.include_router(history_router)
 
 
 @app.get("/")

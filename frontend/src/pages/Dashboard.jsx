@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { processAudio } from "../services/api";
+import { saveTranscript } from "../services/supabase";
 import { downloadPDF } from "../utils/downloadPDF";
 import Navbar from "../components/Navbar";
 import AudioUploader from "../components/AudioUploader";
@@ -20,9 +21,17 @@ export default function Dashboard({ session }) {
     setFileName(file.name);
 
     try {
-      const token = session?.access_token;
-      const data = await processAudio(file, token);
+      const data = await processAudio(file);
       setResult(data);
+      if (session?.user?.id) {
+        await saveTranscript({
+          userId: session.user.id,
+          audioName: file.name,
+          transcript: data.transcript,
+          summary: data.summary,
+          keyPoints: data.key_points,
+        });
+      }
     } catch (err) {
       setError(err.message);
     } finally {

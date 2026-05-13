@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import Navbar from "../components/Navbar";
 import HistoryItem from "../components/HistoryItem";
-import { getHistory } from "../services/api";
+import { fetchHistory } from "../services/supabase";
 
 export default function HistoryPage({ session }) {
   const [records, setRecords] = useState([]);
@@ -11,7 +11,7 @@ export default function HistoryPage({ session }) {
   useEffect(() => {
     async function fetchHistory() {
       try {
-        const data = await getHistory(session.access_token);
+        const data = await fetchHistory(session.user.id);
         setRecords(data);
       } catch (err) {
         setError(err.message);
