@@ -1,0 +1,23 @@
+# Environment variables - never commit these
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Node / React
+node_modules/
+dist/
+.next/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp audio uploads
+*.mp3
+*.wav
+*.m4a
