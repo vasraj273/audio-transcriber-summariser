@@ -21,3 +21,8 @@ app.include_router(history_router)
 @app.get("/")
 def health_check():
     return {"status": "API is running"}
+
+
+@app.get("/ping")
+def ping():
+    return {"ok": True}

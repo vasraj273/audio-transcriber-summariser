@@ -20,6 +20,15 @@ export default function App() {
     return () => listener.subscription.unsubscribe();
   }, []);
 
+  useEffect(() => {
+    if (!session) return;
+    const backendUrl = import.meta.env.VITE_BACKEND_URL;
+    const ping = () => fetch(`${backendUrl}/ping`).catch(() => {});
+    ping();
+    const interval = setInterval(ping, 10 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [session]);
+
   if (session === undefined) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
