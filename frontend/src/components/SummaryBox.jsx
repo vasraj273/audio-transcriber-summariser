@@ -1,10 +1,11 @@
 import { useState } from "react";
+import { copyText } from "../utils/copyText";
 
 export default function SummaryBox({ summary }) {
   const [copied, setCopied] = useState(false);
 
-  function handleCopy() {
-    navigator.clipboard.writeText(summary);
+  async function handleCopy() {
+    await copyText(summary);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }

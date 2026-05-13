@@ -1,10 +1,11 @@
 import { useState } from "react";
+import { copyText } from "../utils/copyText";
 
 export default function TranscriptBox({ transcript }) {
   const [copied, setCopied] = useState(false);
 
-  function handleCopy() {
-    navigator.clipboard.writeText(transcript);
+  async function handleCopy() {
+    await copyText(transcript);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }

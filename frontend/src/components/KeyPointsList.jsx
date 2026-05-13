@@ -1,11 +1,12 @@
 import { useState } from "react";
+import { copyText } from "../utils/copyText";
 
 export default function KeyPointsList({ keyPoints }) {
   const [copied, setCopied] = useState(false);
 
-  function handleCopy() {
+  async function handleCopy() {
     const text = keyPoints.map((p, i) => `${i + 1}. ${p}`).join("\n");
-    navigator.clipboard.writeText(text);
+    await copyText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
