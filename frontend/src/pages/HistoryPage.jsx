@@ -9,7 +9,7 @@ export default function HistoryPage({ session }) {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    async function fetchHistory() {
+    async function loadHistory() {
       try {
         const data = await fetchHistory(session.user.id);
         setRecords(data);
@@ -19,7 +19,7 @@ export default function HistoryPage({ session }) {
         setLoading(false);
       }
     }
-    fetchHistory();
+    loadHistory();
   }, [session]);
 
   return (
