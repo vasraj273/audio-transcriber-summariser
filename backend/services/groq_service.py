@@ -1,5 +1,6 @@
 import os
 import re
+from collections import Counter
 from groq import Groq
 from dotenv import load_dotenv
 
@@ -37,6 +38,79 @@ def transcribe_audio(file_path: str) -> dict:
         "text": response.text,
         "language": getattr(response, "language", "unknown"),
         "segments": [segment for segment in segments if segment["text"]],
+        "duration": max((segment["end"] for segment in segments), default=0),
+    }
+
+
+def assess_transcription_quality(transcription: dict) -> dict:
+    text = (transcription.get("text") or "").strip()
+    segments = transcription.get("segments") or []
+    duration = float(transcription.get("duration") or 0)
+    flags = []
+
+    if not text or len(text) < 20:
+        flags.append("very_little_speech_detected")
+
+    words = re.findall(r"\b[\w']+\b", text, flags=re.UNICODE)
+    word_count = len(words)
+    speech_density = word_count / max(duration, 1)
+    if duration > 20 and speech_density < 0.45:
+        flags.append("low_speech_density")
+
+    unique_ratio = len({word.lower() for word in words}) / max(word_count, 1)
+    if word_count > 40 and unique_ratio < 0.25:
+        flags.append("repetitive_or_looped_text")
+
+    scripts = _detect_scripts(text)
+    if len(scripts) >= 4:
+        flags.append("unstable_mixed_scripts")
+
+    non_latin_ratio = _non_latin_ratio(text)
+    if non_latin_ratio > 0.45 and transcription.get("language") in {"en", "unknown"}:
+        flags.append("unexpected_script_for_language")
+
+    short_segments = [
+        segment for segment in segments
+        if len(segment.get("text", "").split()) <= 2 and (segment.get("end", 0) - segment.get("start", 0)) > 2.5
+    ]
+    if segments and len(short_segments) / len(segments) > 0.45:
+        flags.append("sparse_inconsistent_segments")
+
+    repeated_phrases = _count_repeated_phrases(text)
+    if repeated_phrases >= 4:
+        flags.append("repeated_phrase_hallucination")
+
+    score = 1.0
+    score -= 0.22 * len(flags)
+    if speech_density < 0.35:
+        score -= 0.2
+    if len(scripts) >= 3:
+        score -= 0.12
+    score = max(0.0, min(1.0, score))
+
+    if "low_speech_density" in flags and ("unstable_mixed_scripts" in flags or "repeated_phrase_hallucination" in flags):
+        audio_type = "music_song"
+    elif score < 0.45 or "very_little_speech_detected" in flags:
+        audio_type = "noisy_unsupported"
+    elif _looks_like_interview_or_podcast(text):
+        audio_type = "podcast_interview"
+    elif _looks_like_meeting(text):
+        audio_type = "meeting_call"
+    else:
+        audio_type = "speech_conversation"
+
+    warning = ""
+    if audio_type == "music_song":
+        warning = "This audio appears to be music/song content. Accurate speech transcription may not be possible."
+    elif audio_type == "noisy_unsupported":
+        warning = "This audio does not appear to contain clear speech. Accurate transcription may not be possible."
+
+    return {
+        "audio_type": audio_type,
+        "quality_score": round(score, 2),
+        "quality_flags": flags,
+        "warning": warning,
+        "is_supported": audio_type not in {"music_song", "noisy_unsupported"} and score >= 0.35,
     }
 
 
@@ -135,6 +209,41 @@ KEY POINTS:
 
     raw = response.choices[0].message.content
     return _parse_llm_response(raw)
+
+
+def compare_transcripts(records: list) -> str:
+    content = _format_records_for_analysis(records)
+    prompt = f"""Compare these transcript records for a professional user.
+
+Create a concise markdown report with:
+- Executive comparison
+- Side-by-side themes
+- Key similarities
+- Key differences
+- Follow-up questions or risks
+
+Records:
+{content}
+"""
+    return _run_analysis_prompt(prompt)
+
+
+def merge_transcripts(records: list) -> str:
+    content = _format_records_for_analysis(records)
+    prompt = f"""Merge these transcript records into one clean set of notes.
+
+Create a concise markdown report with:
+- Combined summary
+- Deduplicated key points
+- Action items or decisions if present
+- Organized notes by topic
+
+Avoid repeating the same point twice.
+
+Records:
+{content}
+"""
+    return _run_analysis_prompt(prompt)
 
 
 def infer_speakers(transcript: str, segments: list | None = None) -> dict:
@@ -376,3 +485,86 @@ def _build_speaker_transcript(segments: list) -> str:
 def _apply_default_speaker(segments: list, speaker_count: int = 1) -> list:
     speaker = "Speaker 1" if speaker_count <= 1 else ""
     return [{**segment, "speaker": segment.get("speaker") or speaker} for segment in segments]
+
+
+def _detect_scripts(text: str) -> set:
+    scripts = set()
+    for char in text:
+        code = ord(char)
+        if 0x0041 <= code <= 0x007A:
+            scripts.add("latin")
+        elif 0x0600 <= code <= 0x06FF:
+            scripts.add("arabic")
+        elif 0x0900 <= code <= 0x097F:
+            scripts.add("devanagari")
+        elif 0x0A00 <= code <= 0x0A7F:
+            scripts.add("gurmukhi")
+        elif 0x0B80 <= code <= 0x0BFF:
+            scripts.add("tamil")
+        elif 0x0C00 <= code <= 0x0C7F:
+            scripts.add("telugu")
+        elif 0x0C80 <= code <= 0x0CFF:
+            scripts.add("kannada")
+        elif 0x0980 <= code <= 0x09FF:
+            scripts.add("bengali")
+    return scripts
+
+
+def _non_latin_ratio(text: str) -> float:
+    letters = [char for char in text if char.isalpha()]
+    if not letters:
+        return 0
+    non_latin = [char for char in letters if ord(char) > 0x024F]
+    return len(non_latin) / len(letters)
+
+
+def _count_repeated_phrases(text: str) -> int:
+    words = [word.lower() for word in re.findall(r"\b[\w']+\b", text, flags=re.UNICODE)]
+    phrases = [" ".join(words[i:i + 3]) for i in range(max(0, len(words) - 2))]
+    counts = Counter(phrases)
+    return sum(1 for count in counts.values() if count >= 3)
+
+
+def _looks_like_meeting(text: str) -> bool:
+    terms = {"meeting", "agenda", "action", "deadline", "decision", "project", "client", "team"}
+    lower = text.lower()
+    return sum(1 for term in terms if term in lower) >= 2
+
+
+def _looks_like_interview_or_podcast(text: str) -> bool:
+    terms = {"welcome", "episode", "podcast", "interview", "question", "guest", "host"}
+    lower = text.lower()
+    return sum(1 for term in terms if term in lower) >= 2
+
+
+def _format_records_for_analysis(records: list) -> str:
+    blocks = []
+    for index, record in enumerate(records[:6], start=1):
+        key_points = record.get("key_points") or record.get("keyPoints") or []
+        if isinstance(key_points, list):
+            points = "\n".join(f"- {point}" for point in key_points[:10])
+        else:
+            points = str(key_points)
+        transcript = (record.get("transcript") or "")[:6000]
+        blocks.append(
+            f"""Record {index}: {record.get('audio_name') or record.get('audioName') or 'Untitled'}
+Language: {record.get('detected_language') or 'unknown'}
+Speaker count: {record.get('speaker_count') or 'unknown'}
+Summary:
+{record.get('summary') or ''}
+Key points:
+{points}
+Transcript excerpt:
+{transcript}
+"""
+        )
+    return "\n---\n".join(blocks)
+
+
+def _run_analysis_prompt(prompt: str) -> str:
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.25,
+    )
+    return response.choices[0].message.content.strip()

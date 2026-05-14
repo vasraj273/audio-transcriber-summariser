@@ -2,7 +2,12 @@ import os
 import tempfile
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from models.schemas import ProcessResponse
-from services.groq_service import transcribe_audio, summarise_transcript, infer_speakers
+from services.groq_service import (
+    assess_transcription_quality,
+    infer_speakers,
+    summarise_transcript,
+    transcribe_audio,
+)
 
 router = APIRouter()
 
@@ -23,38 +28,76 @@ async def process_audio(
     tmp_path = await _save_temp_file(file)
 
     try:
-        transcription = transcribe_audio(tmp_path)
-        result = summarise_transcript(
-            transcript=transcription["text"],
-            output_language=output_language,
-            focus=summary_focus,
-            format=summary_format,
-            length=summary_length,
-            custom_focus=custom_focus,
+        result = process_audio_file(
+            tmp_path,
+            {
+                "output_language": output_language,
+                "summary_focus": summary_focus,
+                "summary_format": summary_format,
+                "summary_length": summary_length,
+                "custom_focus": custom_focus,
+            },
         )
-        try:
-            speaker_result = infer_speakers(transcription["text"], transcription["segments"])
-        except Exception:
-            speaker_result = {
-                "speaker_transcript": transcription["text"],
-                "speaker_count": 1,
-                "segments": [
-                    {**segment, "speaker": "Speaker 1"}
-                    for segment in transcription["segments"]
-                ],
-            }
     finally:
         os.remove(tmp_path)
 
-    return ProcessResponse(
+    return ProcessResponse(**result)
+
+
+def process_audio_file(file_path: str, options: dict) -> dict:
+    transcription = transcribe_audio(file_path)
+    quality = assess_transcription_quality(transcription)
+
+    if not quality["is_supported"]:
+        return {
+            "transcript": "",
+            "summary": quality["warning"],
+            "key_points": [],
+            "detected_language": transcription["language"],
+            "transcript_segments": [],
+            "speaker_transcript": "",
+            "speaker_count": 0,
+            "audio_type": quality["audio_type"],
+            "quality_score": quality["quality_score"],
+            "quality_flags": quality["quality_flags"],
+            "warning": quality["warning"],
+            "duration_seconds": transcription.get("duration", 0),
+        }
+
+    summary_result = summarise_transcript(
         transcript=transcription["text"],
-        summary=result["summary"],
-        key_points=result["key_points"],
-        detected_language=transcription["language"],
-        transcript_segments=speaker_result["segments"],
-        speaker_transcript=speaker_result["speaker_transcript"],
-        speaker_count=speaker_result["speaker_count"],
+        output_language=options.get("output_language", "English"),
+        focus=options.get("summary_focus", "General Summary"),
+        format=options.get("summary_format", "Bullet Points"),
+        length=options.get("summary_length", "Medium"),
+        custom_focus=options.get("custom_focus", ""),
     )
+    try:
+        speaker_result = infer_speakers(transcription["text"], transcription["segments"])
+    except Exception:
+        speaker_result = {
+            "speaker_transcript": transcription["text"],
+            "speaker_count": 1,
+            "segments": [
+                {**segment, "speaker": "Speaker 1"}
+                for segment in transcription["segments"]
+            ],
+        }
+
+    return {
+        "transcript": transcription["text"],
+        "summary": summary_result["summary"],
+        "key_points": summary_result["key_points"],
+        "detected_language": transcription["language"],
+        "transcript_segments": speaker_result["segments"],
+        "speaker_transcript": speaker_result["speaker_transcript"],
+        "speaker_count": speaker_result["speaker_count"],
+        "audio_type": quality["audio_type"],
+        "quality_score": quality["quality_score"],
+        "quality_flags": quality["quality_flags"],
+        "warning": quality["warning"],
+        "duration_seconds": transcription.get("duration", 0),
+    }
 
 
 def _validate_file(file: UploadFile):

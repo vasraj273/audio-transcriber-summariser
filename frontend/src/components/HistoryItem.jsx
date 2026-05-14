@@ -2,7 +2,7 @@ import { useState } from "react";
 import { downloadPDF } from "../utils/downloadPDF";
 import Markdown from "./Markdown";
 
-export default function HistoryItem({ record }) {
+export default function HistoryItem({ record, selectable = false, selected = false, onSelect }) {
   const [expanded, setExpanded] = useState(false);
 
   const date = new Date(record.created_at).toLocaleDateString("en-GB", {
@@ -14,8 +14,18 @@ export default function HistoryItem({ record }) {
       : record.transcript;
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+    <div className={`bg-white rounded-xl border shadow-sm p-6 transition-colors ${
+      selected ? "border-indigo-300 ring-2 ring-indigo-100" : "border-gray-200"
+    }`}>
       <div className="flex items-start justify-between gap-4">
+        {selectable && (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => onSelect(record.id)}
+            className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+          />
+        )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <svg className="w-4 h-4 text-indigo-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -25,6 +35,14 @@ export default function HistoryItem({ record }) {
             <p className="font-semibold text-gray-800 truncate">{record.audio_name}</p>
           </div>
           <p className="text-xs text-gray-400">{date}</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <StatusBadge status={record.status} />
+            {record.audio_type && (
+              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500">
+                {record.audio_type.replaceAll("_", " ")}
+              </span>
+            )}
+          </div>
           {!expanded && (
             <p className="text-sm text-gray-500 mt-2 line-clamp-2">{record.summary}</p>
           )}
@@ -39,6 +57,7 @@ export default function HistoryItem({ record }) {
               summary: record.summary,
               keyPoints: record.key_points,
             })}
+            disabled={record.status && record.status !== "completed"}
             className="flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-800 font-medium transition-colors"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -86,5 +105,19 @@ export default function HistoryItem({ record }) {
         </div>
       )}
     </div>
+  );
+}
+
+function StatusBadge({ status = "completed" }) {
+  const styles = {
+    queued: "bg-slate-100 text-slate-600",
+    processing: "bg-indigo-100 text-indigo-700",
+    completed: "bg-emerald-100 text-emerald-700",
+    failed: "bg-red-100 text-red-700",
+  };
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${styles[status] || styles.completed}`}>
+      {status}
+    </span>
   );
 }
