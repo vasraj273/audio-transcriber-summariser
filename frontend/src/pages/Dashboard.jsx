@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { processAudio } from "../services/api";
 import { saveTranscript } from "../services/supabase";
 import { downloadPDF } from "../utils/downloadPDF";
@@ -25,6 +25,13 @@ export default function Dashboard({ session }) {
   const [error, setError] = useState(null);
   const [options, setOptions] = useState(DEFAULT_OPTIONS);
   const [chatSessionId, setChatSessionId] = useState(0);
+  const [audioUrl, setAudioUrl] = useState("");
+
+  useEffect(() => {
+    return () => {
+      if (audioUrl) URL.revokeObjectURL(audioUrl);
+    };
+  }, [audioUrl]);
 
   async function handleSubmit(file) {
     setLoading(true);
@@ -32,9 +39,15 @@ export default function Dashboard({ session }) {
     setResult(null);
     setFileName(file.name);
     setChatSessionId((id) => id + 1);
+    setAudioUrl((currentUrl) => {
+      if (currentUrl) URL.revokeObjectURL(currentUrl);
+      return "";
+    });
 
     try {
       const data = await processAudio(file, options);
+      const nextAudioUrl = URL.createObjectURL(file);
+      setAudioUrl(nextAudioUrl);
       setResult(data);
       if (session?.user?.id) {
         await saveTranscript({
@@ -44,6 +57,8 @@ export default function Dashboard({ session }) {
           summary: data.summary,
           keyPoints: data.key_points,
           detectedLanguage: data.detected_language,
+          speakerTranscript: data.speaker_transcript,
+          speakerCount: data.speaker_count,
           outputLanguage: options.outputLanguage,
           focus: options.focus,
           format: options.format,
@@ -56,6 +71,10 @@ export default function Dashboard({ session }) {
       setLoading(false);
     }
   }
+
+  const speakerTranscript = result?.speaker_transcript || "";
+  const hasSpeakerTranscript = Boolean(result?.speaker_count >= 2 && speakerTranscript.trim());
+  const transcriptForContext = hasSpeakerTranscript ? speakerTranscript : result?.transcript;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -108,7 +127,7 @@ export default function Dashboard({ session }) {
                 onClick={() => downloadPDF({
                   audioName: fileName,
                   createdAt: new Date().toISOString(),
-                  transcript: result.transcript,
+                  transcript: transcriptForContext,
                   summary: result.summary,
                   keyPoints: result.key_points,
                 })}
@@ -125,12 +144,18 @@ export default function Dashboard({ session }) {
             <div className="flex flex-col gap-6">
               <SummaryBox summary={result.summary} />
               <KeyPointsList keyPoints={result.key_points} />
-              <TranscriptBox transcript={result.transcript} />
+              <TranscriptBox
+                transcript={result.transcript}
+                speakerTranscript={speakerTranscript}
+                speakerCount={result.speaker_count}
+                transcriptSegments={result.transcript_segments}
+                audioUrl={audioUrl}
+              />
             </div>
 
             <ChatPanel
               key={chatSessionId}
-              transcript={result.transcript}
+              transcript={transcriptForContext}
               summary={result.summary}
             />
           </div>

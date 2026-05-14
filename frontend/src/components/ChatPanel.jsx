@@ -37,7 +37,7 @@ export default function ChatPanel({ transcript, summary }) {
       const answer = await chatWithAudio({
         transcript,
         summary,
-        messages: updated,
+        messages,
         question: q,
       });
       setMessages((prev) => [...prev, { role: "assistant", content: answer }]);

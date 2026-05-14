@@ -8,6 +8,10 @@ export default function HistoryItem({ record }) {
   const date = new Date(record.created_at).toLocaleDateString("en-GB", {
     day: "numeric", month: "short", year: "numeric",
   });
+  const transcriptForExport =
+    record.speaker_count >= 2 && record.speaker_transcript
+      ? record.speaker_transcript
+      : record.transcript;
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
@@ -31,7 +35,7 @@ export default function HistoryItem({ record }) {
             onClick={() => downloadPDF({
               audioName: record.audio_name,
               createdAt: record.created_at,
-              transcript: record.transcript,
+              transcript: transcriptForExport,
               summary: record.summary,
               keyPoints: record.key_points,
             })}
@@ -76,7 +80,7 @@ export default function HistoryItem({ record }) {
           <div>
             <h3 className="text-sm font-semibold text-gray-700 mb-1">Full Transcript</h3>
             <div className="max-h-48 overflow-y-auto bg-gray-50 rounded-lg p-3">
-              <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-wrap">{record.transcript}</p>
+              <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-wrap">{transcriptForExport}</p>
             </div>
           </div>
         </div>

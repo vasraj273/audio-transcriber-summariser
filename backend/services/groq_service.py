@@ -1,4 +1,5 @@
 import os
+import re
 from groq import Groq
 from dotenv import load_dotenv
 
@@ -13,10 +14,29 @@ def transcribe_audio(file_path: str) -> dict:
             model="whisper-large-v3",
             file=audio_file,
             response_format="verbose_json",
+            timestamp_granularities=["segment"],
         )
+    segments = []
+    for segment in getattr(response, "segments", []) or []:
+        if isinstance(segment, dict):
+            start = segment.get("start", 0)
+            end = segment.get("end", start)
+            text = segment.get("text", "")
+        else:
+            start = getattr(segment, "start", 0)
+            end = getattr(segment, "end", start)
+            text = getattr(segment, "text", "")
+
+        segments.append({
+            "start": float(start or 0),
+            "end": float(end or start or 0),
+            "text": str(text).strip(),
+        })
+
     return {
         "text": response.text,
         "language": getattr(response, "language", "unknown"),
+        "segments": [segment for segment in segments if segment["text"]],
     }
 
 
@@ -117,6 +137,116 @@ KEY POINTS:
     return _parse_llm_response(raw)
 
 
+def infer_speakers(transcript: str, segments: list | None = None) -> dict:
+    if not transcript.strip():
+        return {"speaker_transcript": "", "speaker_count": 0, "segments": []}
+
+    if segments:
+        return _infer_segment_speakers(transcript, segments)
+
+    prompt = f"""You infer speaker turns from plain audio transcripts.
+
+The transcript below may contain one or more speakers, but it has no speaker labels.
+Your job is to reformat it only when speaker changes can be reasonably inferred from conversational cues.
+
+Rules:
+- Do not invent names, facts, or dialogue.
+- Use labels like Speaker 1, Speaker 2, Speaker 3.
+- Preserve the original meaning and wording as closely as possible.
+- If there is only one clear speaker, keep the transcript as one Speaker 1 block.
+- If speaker changes are uncertain, choose the smallest reasonable number of speakers.
+
+Transcript:
+\"\"\"
+{transcript}
+\"\"\"
+
+Respond in EXACTLY this format and nothing else:
+
+SPEAKER_COUNT:
+<number>
+
+SPEAKER_TRANSCRIPT:
+Speaker 1: <text>
+Speaker 2: <text>
+"""
+
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.1,
+    )
+
+    raw = response.choices[0].message.content
+    speaker_result = _parse_speaker_response(raw, transcript)
+    return {
+        **speaker_result,
+        "segments": _apply_default_speaker(segments or [], speaker_result["speaker_count"]),
+    }
+
+
+def _infer_segment_speakers(transcript: str, segments: list) -> dict:
+    numbered_segments = "\n".join(
+        f"{index + 1}. [{segment['start']:.2f}-{segment['end']:.2f}] {segment['text']}"
+        for index, segment in enumerate(segments)
+    )
+
+    prompt = f"""You infer speaker turns from timestamped transcript segments.
+
+Each numbered line below is one transcript segment from Whisper. Assign exactly one speaker label to each segment.
+
+Rules:
+- Use labels like Speaker 1, Speaker 2, Speaker 3.
+- Do not invent names.
+- Do not rewrite transcript text.
+- Keep the same speaker across consecutive lines when the same person appears to continue speaking.
+- If speaker changes are uncertain, choose the smallest reasonable number of speakers.
+- Return one assignment for every segment number.
+
+Full transcript for context:
+\"\"\"
+{transcript}
+\"\"\"
+
+Timestamped segments:
+{numbered_segments}
+
+Respond in EXACTLY this format and nothing else:
+
+SPEAKER_COUNT:
+<number>
+
+ASSIGNMENTS:
+1|Speaker 1
+2|Speaker 1
+3|Speaker 2
+"""
+
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.1,
+    )
+
+    raw = response.choices[0].message.content
+    assignments, speaker_count = _parse_segment_speaker_assignments(raw)
+    speaker_segments = []
+
+    for index, segment in enumerate(segments, start=1):
+        speaker = assignments.get(index, "Speaker 1")
+        speaker_segments.append({**segment, "speaker": speaker})
+
+    labels = {segment["speaker"] for segment in speaker_segments if segment.get("speaker")}
+    if labels:
+        speaker_count = len(labels)
+
+    return {
+        "speaker_transcript": _build_speaker_transcript(speaker_segments),
+        "speaker_count": max(speaker_count, 1),
+        "segments": speaker_segments,
+    }
+
+
 def chat_with_audio(
     transcript: str,
     summary: str,
@@ -171,3 +301,78 @@ def _parse_llm_response(raw: str) -> dict:
         summary = raw.strip()
 
     return {"summary": summary, "key_points": key_points}
+
+
+def _parse_speaker_response(raw: str, original_transcript: str) -> dict:
+    speaker_transcript = original_transcript.strip()
+    speaker_count = 1
+
+    count_match = re.search(r"SPEAKER_COUNT:\s*(\d+)", raw, re.IGNORECASE)
+    if count_match:
+        speaker_count = int(count_match.group(1))
+
+    if "SPEAKER_TRANSCRIPT:" in raw:
+        speaker_transcript = raw.split("SPEAKER_TRANSCRIPT:", 1)[1].strip()
+    elif "Speaker 1:" in raw:
+        speaker_transcript = raw[raw.find("Speaker 1:"):].strip()
+
+    labels = set(re.findall(r"\bSpeaker\s+(\d+)\s*:", speaker_transcript, re.IGNORECASE))
+    if labels:
+        speaker_count = max(speaker_count, len(labels))
+
+    return {
+        "speaker_transcript": speaker_transcript,
+        "speaker_count": max(speaker_count, 1),
+    }
+
+
+def _parse_segment_speaker_assignments(raw: str) -> tuple[dict, int]:
+    assignments = {}
+    speaker_count = 1
+
+    count_match = re.search(r"SPEAKER_COUNT:\s*(\d+)", raw, re.IGNORECASE)
+    if count_match:
+        speaker_count = int(count_match.group(1))
+
+    for line in raw.splitlines():
+        match = re.match(r"\s*(\d+)\s*[|:\-]\s*(Speaker\s+\d+)\s*$", line, re.IGNORECASE)
+        if match:
+            assignments[int(match.group(1))] = _normalize_speaker_label(match.group(2))
+
+    return assignments, max(speaker_count, 1)
+
+
+def _normalize_speaker_label(label: str) -> str:
+    match = re.search(r"speaker\s+(\d+)", label, re.IGNORECASE)
+    if not match:
+        return "Speaker 1"
+    return f"Speaker {int(match.group(1))}"
+
+
+def _build_speaker_transcript(segments: list) -> str:
+    lines = []
+    current_speaker = ""
+    current_text = []
+
+    for segment in segments:
+        speaker = segment.get("speaker") or "Speaker 1"
+        text = segment.get("text", "").strip()
+        if not text:
+            continue
+
+        if speaker != current_speaker and current_text:
+            lines.append(f"{current_speaker}: {' '.join(current_text)}")
+            current_text = []
+
+        current_speaker = speaker
+        current_text.append(text)
+
+    if current_text:
+        lines.append(f"{current_speaker}: {' '.join(current_text)}")
+
+    return "\n".join(lines)
+
+
+def _apply_default_speaker(segments: list, speaker_count: int = 1) -> list:
+    speaker = "Speaker 1" if speaker_count <= 1 else ""
+    return [{**segment, "speaker": segment.get("speaker") or speaker} for segment in segments]
