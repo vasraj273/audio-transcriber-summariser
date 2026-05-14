@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { copyText } from "../utils/copyText";
+import Markdown from "./Markdown";
 
 export default function SummaryBox({ summary }) {
   const [copied, setCopied] = useState(false);
@@ -35,7 +36,7 @@ export default function SummaryBox({ summary }) {
           )}
         </button>
       </div>
-      <p className="text-gray-700 text-sm leading-relaxed">{summary}</p>
+      <Markdown>{summary}</Markdown>
     </div>
   );
 }

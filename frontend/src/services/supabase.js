@@ -5,13 +5,29 @@ export const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
-export async function saveTranscript({ userId, audioName, transcript, summary, keyPoints }) {
+export async function saveTranscript({
+  userId,
+  audioName,
+  transcript,
+  summary,
+  keyPoints,
+  detectedLanguage,
+  outputLanguage,
+  focus,
+  format,
+  summaryLength,
+}) {
   const { error } = await supabase.from("transcripts").insert({
     user_id: userId,
     audio_name: audioName,
     transcript,
     summary,
     key_points: JSON.stringify(keyPoints),
+    detected_language: detectedLanguage,
+    output_language: outputLanguage,
+    focus,
+    format,
+    summary_length: summaryLength,
   });
   if (error) console.error("[Supabase] Save failed:", error.message);
 }
@@ -19,7 +35,7 @@ export async function saveTranscript({ userId, audioName, transcript, summary, k
 export async function fetchHistory(userId) {
   const { data, error } = await supabase
     .from("transcripts")
-    .select("id, audio_name, transcript, summary, key_points, created_at")
+    .select("id, audio_name, transcript, summary, key_points, created_at, detected_language, output_language, focus, format, summary_length")
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
 

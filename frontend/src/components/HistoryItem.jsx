@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { downloadPDF } from "../utils/downloadPDF";
+import Markdown from "./Markdown";
 
 export default function HistoryItem({ record }) {
   const [expanded, setExpanded] = useState(false);
@@ -55,7 +56,7 @@ export default function HistoryItem({ record }) {
         <div className="mt-5 flex flex-col gap-4 border-t border-gray-100 pt-5">
           <div>
             <h3 className="text-sm font-semibold text-gray-700 mb-1">Summary</h3>
-            <p className="text-sm text-gray-600 leading-relaxed">{record.summary}</p>
+            <Markdown>{record.summary}</Markdown>
           </div>
 
           <div>
@@ -66,7 +67,7 @@ export default function HistoryItem({ record }) {
                   <span className="flex-shrink-0 w-5 h-5 bg-indigo-100 text-indigo-700 rounded-full text-xs font-bold flex items-center justify-center mt-0.5">
                     {i + 1}
                   </span>
-                  {point}
+                  <div className="flex-1"><Markdown>{point}</Markdown></div>
                 </li>
               ))}
             </ul>

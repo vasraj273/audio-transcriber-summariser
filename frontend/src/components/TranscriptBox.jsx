@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { copyText } from "../utils/copyText";
+import Markdown from "./Markdown";
 
 export default function TranscriptBox({ transcript }) {
   const [copied, setCopied] = useState(false);
@@ -36,7 +37,7 @@ export default function TranscriptBox({ transcript }) {
         </button>
       </div>
       <div className="max-h-64 overflow-y-auto">
-        <p className="text-gray-700 text-sm leading-relaxed whitespace-pre-wrap">{transcript}</p>
+        <Markdown>{transcript}</Markdown>
       </div>
     </div>
   );

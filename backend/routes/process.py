@@ -1,6 +1,6 @@
 import os
 import tempfile
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from models.schemas import ProcessResponse
 from services.groq_service import transcribe_audio, summarise_transcript
 
@@ -11,20 +11,35 @@ MAX_FILE_SIZE_MB = 25
 
 
 @router.post("/process", response_model=ProcessResponse)
-async def process_audio(file: UploadFile = File(...)):
+async def process_audio(
+    file: UploadFile = File(...),
+    output_language: str = Form("English"),
+    summary_focus: str = Form("General Summary"),
+    summary_format: str = Form("Bullet Points"),
+    summary_length: str = Form("Medium"),
+    custom_focus: str = Form(""),
+):
     _validate_file(file)
     tmp_path = await _save_temp_file(file)
 
     try:
-        transcript = transcribe_audio(tmp_path)
-        result = summarise_transcript(transcript)
+        transcription = transcribe_audio(tmp_path)
+        result = summarise_transcript(
+            transcript=transcription["text"],
+            output_language=output_language,
+            focus=summary_focus,
+            format=summary_format,
+            length=summary_length,
+            custom_focus=custom_focus,
+        )
     finally:
         os.remove(tmp_path)
 
     return ProcessResponse(
-        transcript=transcript,
+        transcript=transcription["text"],
         summary=result["summary"],
         key_points=result["key_points"],
+        detected_language=transcription["language"],
     )
 
 

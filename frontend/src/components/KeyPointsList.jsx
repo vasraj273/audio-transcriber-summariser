@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { copyText } from "../utils/copyText";
+import Markdown from "./Markdown";
 
 export default function KeyPointsList({ keyPoints }) {
   const [copied, setCopied] = useState(false);
@@ -42,7 +43,9 @@ export default function KeyPointsList({ keyPoints }) {
             <span className="mt-0.5 flex-shrink-0 w-5 h-5 bg-indigo-100 text-indigo-700 rounded-full text-xs font-bold flex items-center justify-center">
               {index + 1}
             </span>
-            <span className="text-gray-700 text-sm leading-relaxed">{point}</span>
+            <div className="text-gray-700 text-sm leading-relaxed flex-1">
+              <Markdown>{point}</Markdown>
+            </div>
           </li>
         ))}
       </ul>
