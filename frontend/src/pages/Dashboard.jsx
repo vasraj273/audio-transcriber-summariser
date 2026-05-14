@@ -53,12 +53,14 @@ export default function Dashboard({ session }) {
     <div className="min-h-screen bg-gray-50">
       <Navbar session={session} />
 
-      <main className="max-w-4xl mx-auto px-6 py-10">
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-gray-800">Transcribe & Summarise</h1>
-          <p className="text-gray-500 mt-1 text-sm">
-            Upload an audio file to get a transcript, summary, and key points.
-          </p>
+      <main className="mx-auto max-w-4xl px-4 pb-10 sm:px-6">
+        <div className="sticky top-[61px] z-40 -mx-4 mb-6 border-b border-gray-200 bg-gray-50/95 px-4 py-4 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-gray-50/85 sm:-mx-6 sm:px-6">
+          <div className="flex flex-col gap-1">
+            <h1 className="text-2xl font-bold text-gray-800">Transcribe & Summarise</h1>
+            <p className="text-gray-500 text-sm">
+              Upload an audio file to get a transcript, summary, and key points.
+            </p>
+          </div>
         </div>
 
         <CustomizationPanel options={options} setOptions={setOptions} disabled={loading || isProcessing} />

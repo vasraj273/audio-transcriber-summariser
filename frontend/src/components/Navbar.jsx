@@ -25,9 +25,9 @@ export default function Navbar({ session }) {
   }
 
   return (
-    <nav className="bg-white border-b border-gray-200 px-6 py-4">
-      <div className="max-w-4xl mx-auto flex items-center justify-between">
-        <div className="flex items-center gap-8">
+    <nav className="sticky top-0 z-50 border-b border-gray-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/85 sm:px-6">
+      <div className="max-w-5xl mx-auto flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-4 sm:gap-8">
           <div className="flex items-center gap-2">
             <div className="bg-indigo-100 rounded-full p-1.5">
               <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -35,7 +35,7 @@ export default function Navbar({ session }) {
                   d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
               </svg>
             </div>
-            <span className="font-semibold text-gray-800">Audio Transcriber</span>
+            <span className="font-semibold text-gray-800 whitespace-nowrap">Audio Transcriber</span>
           </div>
           <div className="flex items-center gap-5">
             {navLink("/dashboard", "Transcribe")}

@@ -15,6 +15,7 @@ export default function HistoryPage({ session }) {
   const [analysisResult, setAnalysisResult] = useState("");
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState("");
+  const [analysisRecords, setAnalysisRecords] = useState([]);
   const { activeJobs } = useProcessingJobs();
 
   useEffect(() => {
@@ -50,6 +51,7 @@ export default function HistoryPage({ session }) {
   async function runAnalysis(mode) {
     const selected = records.filter((record) => selectedIds.includes(record.id));
     setAnalysisMode(mode);
+    setAnalysisRecords(selected);
     setAnalysisResult("");
     setAnalysisError("");
     setAnalysisLoading(true);
@@ -76,32 +78,34 @@ export default function HistoryPage({ session }) {
     <div className="min-h-screen bg-gray-50">
       <Navbar session={session} />
 
-      <main className="max-w-5xl mx-auto px-6 py-10">
-        <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-800">History</h1>
-            <p className="text-gray-500 mt-1 text-sm">Your past transcriptions and summaries.</p>
-          </div>
-
-          {completedRecords.length >= 2 && (
-            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-200 bg-white p-2 shadow-sm">
-              <span className="px-2 text-sm font-medium text-gray-500">{selectedCount} selected</span>
-              <button
-                onClick={() => runAnalysis("compare")}
-                disabled={selectedCount < 2 || analysisLoading}
-                className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Compare
-              </button>
-              <button
-                onClick={() => runAnalysis("merge")}
-                disabled={selectedCount < 2 || analysisLoading}
-                className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Merge
-              </button>
+      <main className="mx-auto max-w-5xl px-4 pb-10 sm:px-6">
+        <div className="sticky top-[61px] z-40 -mx-4 mb-6 border-b border-gray-200 bg-gray-50/95 px-4 py-4 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-gray-50/85 sm:-mx-6 sm:px-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-800">History</h1>
+              <p className="text-gray-500 mt-1 text-sm">Your past transcriptions and summaries.</p>
             </div>
-          )}
+
+            {completedRecords.length >= 2 && (
+              <div className="flex w-full flex-wrap items-center gap-2 rounded-xl border border-gray-200 bg-white p-2 shadow-sm md:w-auto">
+                <span className="px-2 text-sm font-medium text-gray-500">{selectedCount} selected</span>
+                <button
+                  onClick={() => runAnalysis("compare")}
+                  disabled={selectedCount < 2 || analysisLoading}
+                  className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Compare
+                </button>
+                <button
+                  onClick={() => runAnalysis("merge")}
+                  disabled={selectedCount < 2 || analysisLoading}
+                  className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Merge
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {activeJobs.length > 0 && (
@@ -153,6 +157,7 @@ export default function HistoryPage({ session }) {
       <TranscriptAnalysisModal
         mode={analysisMode}
         result={analysisResult}
+        records={analysisRecords}
         loading={analysisLoading}
         error={analysisError}
         onClose={() => setAnalysisMode("")}
