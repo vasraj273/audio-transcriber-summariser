@@ -9,7 +9,7 @@ export async function processAudio(file, options = {}) {
   formData.append("summary_length", options.length || "Medium");
   formData.append("custom_focus", options.customFocus || "");
 
-  const response = await fetch(`${BACKEND_URL}process`, {
+  const response = await fetch(`${BACKEND_URL}/process`, {
     method: "POST",
     body: formData,
   });
