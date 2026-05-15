@@ -8,6 +8,32 @@ load_dotenv()
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
+_PRIMARY_MODEL = "llama-3.3-70b-versatile"
+_FALLBACK_MODEL = "llama-3.1-8b-instant"
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "429" in message or "rate_limit" in message or "rate limit" in message or "tokens per day" in message
+
+
+def _llama_complete(messages: list, temperature: float = 0.3) -> str:
+    try:
+        response = client.chat.completions.create(
+            model=_PRIMARY_MODEL,
+            messages=messages,
+            temperature=temperature,
+        )
+    except Exception as exc:
+        if not _is_rate_limit_error(exc):
+            raise
+        response = client.chat.completions.create(
+            model=_FALLBACK_MODEL,
+            messages=messages,
+            temperature=temperature,
+        )
+    return response.choices[0].message.content
+
 
 def transcribe_audio(file_path: str) -> dict:
     with open(file_path, "rb") as audio_file:
@@ -211,13 +237,7 @@ KEY POINTS:
 - <key point 3>
 """
 
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
-    )
-
-    raw = response.choices[0].message.content
+    raw = _llama_complete([{"role": "user", "content": prompt}], temperature=0.3)
     return _parse_llm_response(raw)
 
 
@@ -290,13 +310,7 @@ Speaker 1: <text>
 Speaker 2: <text>
 """
 
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.1,
-    )
-
-    raw = response.choices[0].message.content
+    raw = _llama_complete([{"role": "user", "content": prompt}], temperature=0.1)
     speaker_result = _parse_speaker_response(raw, transcript)
     return {
         **speaker_result,
@@ -341,13 +355,7 @@ ASSIGNMENTS:
 3|Speaker 2
 """
 
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.1,
-    )
-
-    raw = response.choices[0].message.content
+    raw = _llama_complete([{"role": "user", "content": prompt}], temperature=0.1)
     assignments, speaker_count = _parse_segment_speaker_assignments(raw)
     speaker_segments = []
 
@@ -394,13 +402,7 @@ FULL TRANSCRIPT:
         messages.append({"role": role, "content": content})
     messages.append({"role": "user", "content": question})
 
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=messages,
-        temperature=0.4,
-    )
-
-    return response.choices[0].message.content.strip()
+    return _llama_complete(messages, temperature=0.4).strip()
 
 
 def _parse_llm_response(raw: str) -> dict:
@@ -572,9 +574,4 @@ Transcript excerpt:
 
 
 def _run_analysis_prompt(prompt: str) -> str:
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.25,
-    )
-    return response.choices[0].message.content.strip()
+    return _llama_complete([{"role": "user", "content": prompt}], temperature=0.25).strip()
