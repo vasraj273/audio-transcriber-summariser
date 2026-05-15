@@ -86,7 +86,7 @@ def process_audio_file(file_path: str, options: dict) -> dict:
 
     combined_warning = quality["warning"]
     if summary_warning:
-        combined_warning = (combined_warning + " " if combined_warning else "") + f"Summary skipped: {summary_warning}"
+        combined_warning = (combined_warning + " " if combined_warning else "") + "Summary unavailable right now. Transcript was saved successfully."
 
     return {
         "transcript": transcription["text"],
