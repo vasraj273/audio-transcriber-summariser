@@ -68,15 +68,25 @@ def process_audio_file(file_path: str, options: dict) -> dict:
             "duration_seconds": transcription.get("duration", 0),
         }
 
-    summary_result = summarise_transcript(
-        transcript=transcription["text"],
-        output_language=options.get("output_language", "English"),
-        focus=options.get("summary_focus", "General Summary"),
-        format=options.get("summary_format", "Bullet Points"),
-        length=options.get("summary_length", "Medium"),
-        custom_focus=options.get("custom_focus", ""),
-    )
+    try:
+        summary_result = summarise_transcript(
+            transcript=transcription["text"],
+            output_language=options.get("output_language", "English"),
+            focus=options.get("summary_focus", "General Summary"),
+            format=options.get("summary_format", "Bullet Points"),
+            length=options.get("summary_length", "Medium"),
+            custom_focus=options.get("custom_focus", ""),
+        )
+        summary_warning = ""
+    except Exception as exc:
+        logger.warning("Summary generation failed (%s); returning transcript only.", exc)
+        summary_result = {"summary": "Summary unavailable (AI quota or service error). Transcript was generated successfully.", "key_points": []}
+        summary_warning = str(exc)
     speaker_result = _resolve_speakers(transcription)
+
+    combined_warning = quality["warning"]
+    if summary_warning:
+        combined_warning = (combined_warning + " " if combined_warning else "") + f"Summary skipped: {summary_warning}"
 
     return {
         "transcript": transcription["text"],
@@ -89,7 +99,7 @@ def process_audio_file(file_path: str, options: dict) -> dict:
         "audio_type": quality["audio_type"],
         "quality_score": quality["quality_score"],
         "quality_flags": quality["quality_flags"],
-        "warning": quality["warning"],
+        "warning": combined_warning,
         "duration_seconds": transcription.get("duration", 0),
     }
 
