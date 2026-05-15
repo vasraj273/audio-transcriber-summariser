@@ -1,3 +1,5 @@
+import { HelpIcon } from "./Tooltip";
+
 const OUTPUT_LANGUAGES = [
   "English", "Hindi", "Gujarati", "Tamil", "Marathi",
   "Bengali", "Telugu", "Kannada", "Same as Original",
@@ -14,6 +16,15 @@ const FOCUS_OPTIONS = [
 
 const FORMAT_OPTIONS = ["Bullet Points", "Table", "Paragraph"];
 const LENGTH_OPTIONS = ["Short", "Medium", "Detailed"];
+
+const FOCUS_HELP = {
+  "General Summary": "Balanced overview of the main points.",
+  "Issues & Solutions": "Highlight problems raised and how they were resolved.",
+  "Q&A Format": "Format the summary as question-and-answer pairs.",
+  "Action Items": "List concrete tasks, owners, and deadlines only.",
+  "Key Decisions": "Focus on decisions taken and the reasoning behind them.",
+  Custom: "Write your own focus instruction below.",
+};
 
 export default function CustomizationPanel({ options, setOptions, disabled }) {
   function update(key, value) {
@@ -41,6 +52,7 @@ export default function CustomizationPanel({ options, setOptions, disabled }) {
           options={FOCUS_OPTIONS}
           onChange={(v) => update("focus", v)}
           disabled={disabled}
+          helpText={FOCUS_HELP[options.focus] || "Choose how the summary should be framed."}
         />
         <Dropdown
           label="Output Format"
@@ -78,10 +90,13 @@ export default function CustomizationPanel({ options, setOptions, disabled }) {
   );
 }
 
-function Dropdown({ label, value, options, onChange, disabled }) {
+function Dropdown({ label, value, options, onChange, disabled, helpText }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+      <label className="mb-1 flex items-center gap-1.5 text-sm font-medium text-gray-700">
+        {label}
+        {helpText && <HelpIcon text={helpText} />}
+      </label>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}

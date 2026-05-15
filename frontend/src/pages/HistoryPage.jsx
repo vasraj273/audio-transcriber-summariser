@@ -3,8 +3,11 @@ import Navbar from "../components/Navbar";
 import HistoryItem from "../components/HistoryItem";
 import TranscriptAnalysisModal from "../components/TranscriptAnalysisModal";
 import { useProcessingJobs } from "../context/ProcessingJobsContext";
+import { Link } from "react-router-dom";
 import { compareTranscripts, mergeTranscripts } from "../services/api";
 import { deleteTranscript, fetchHistory } from "../services/supabase";
+import Tooltip from "../components/Tooltip";
+import { friendlyError } from "../utils/errorMessage";
 
 export default function HistoryPage({ session }) {
   const [records, setRecords] = useState([]);
@@ -34,7 +37,7 @@ export default function HistoryPage({ session }) {
       setRecords(data);
       setError(null);
     } catch (err) {
-      setError(err.message);
+      setError(friendlyError(err.message));
     } finally {
       setLoading(false);
     }
@@ -54,7 +57,7 @@ export default function HistoryPage({ session }) {
       setRecords((current) => current.filter((record) => record.id !== recordId));
       setSelectedIds((current) => current.filter((id) => id !== recordId));
     } catch (err) {
-      setError(err.message);
+      setError(friendlyError(err.message));
     }
   }
 
@@ -72,7 +75,7 @@ export default function HistoryPage({ session }) {
         : await mergeTranscripts(selected);
       setAnalysisResult(result);
     } catch (err) {
-      setAnalysisError(err.message);
+      setAnalysisError(friendlyError(err.message));
     } finally {
       setAnalysisLoading(false);
     }
@@ -99,20 +102,24 @@ export default function HistoryPage({ session }) {
             {completedRecords.length >= 2 && (
               <div className="flex w-full flex-wrap items-center gap-2 rounded-xl border border-gray-200 bg-white p-2 shadow-sm md:w-auto">
                 <span className="px-2 text-sm font-medium text-gray-500">{selectedCount} selected</span>
-                <button
-                  onClick={() => runAnalysis("compare")}
-                  disabled={selectedCount < 2 || analysisLoading}
-                  className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Compare
-                </button>
-                <button
-                  onClick={() => runAnalysis("merge")}
-                  disabled={selectedCount < 2 || analysisLoading}
-                  className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Merge
-                </button>
+                <Tooltip text="Compare selected transcripts side by side." placement="bottom">
+                  <button
+                    onClick={() => runAnalysis("compare")}
+                    disabled={selectedCount < 2 || analysisLoading}
+                    className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Compare
+                  </button>
+                </Tooltip>
+                <Tooltip text="Combine notes from multiple transcripts into one." placement="bottom">
+                  <button
+                    onClick={() => runAnalysis("merge")}
+                    disabled={selectedCount < 2 || analysisLoading}
+                    className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Merge
+                  </button>
+                </Tooltip>
               </div>
             )}
           </div>
@@ -140,9 +147,20 @@ export default function HistoryPage({ session }) {
         )}
 
         {!loading && !error && records.length === 0 && (
-          <div className="text-center py-20">
-            <p className="text-gray-500 font-medium">No transcripts yet</p>
-            <p className="text-gray-400 text-sm mt-1">Upload an audio file to get started.</p>
+          <div className="rounded-xl border border-dashed border-gray-300 bg-white p-12 text-center">
+            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-indigo-50 text-indigo-500">
+              <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 13h6m-3-3v6m-9 5a2 2 0 002 2h14a2 2 0 002-2V7a2 2 0 00-2-2h-5l-2-2H5a2 2 0 00-2 2v14z" />
+              </svg>
+            </div>
+            <p className="text-base font-semibold text-gray-800">No transcripts yet</p>
+            <p className="mt-1 text-sm text-gray-500">Upload your first audio to get started.</p>
+            <Link
+              to="/dashboard"
+              className="mt-4 inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700"
+            >
+              Upload Audio
+            </Link>
           </div>
         )}
 

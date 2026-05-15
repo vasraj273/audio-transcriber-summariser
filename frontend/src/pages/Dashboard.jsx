@@ -3,6 +3,7 @@ import { useProcessingJobs } from "../context/ProcessingJobsContext";
 import { useCredits } from "../context/CreditsContext";
 import { computeRequiredCredits } from "../utils/credits";
 import { downloadPDF } from "../utils/downloadPDF";
+import { friendlyError } from "../utils/errorMessage";
 import Navbar from "../components/Navbar";
 import AudioUploader from "../components/AudioUploader";
 import CustomizationPanel from "../components/CustomizationPanel";
@@ -10,6 +11,7 @@ import TranscriptBox from "../components/TranscriptBox";
 import SummaryBox from "../components/SummaryBox";
 import KeyPointsList from "../components/KeyPointsList";
 import ChatPanel from "../components/ChatPanel";
+import ProcessingStages from "../components/ProcessingStages";
 
 const DEFAULT_OPTIONS = {
   outputLanguage: "English",
@@ -50,12 +52,12 @@ export default function Dashboard({ session }) {
         try {
           await deduct({ jobId: job.job_id, recordId: job.record_id, amount: required });
         } catch (err) {
-          setError(err.message || "Credits could not be deducted.");
+          setError(friendlyError(err.message || "Credits could not be deducted."));
           console.error("[Credits] Deduction failed:", err.message);
         }
       }
     } catch (err) {
-      setError(err.message);
+      setError(friendlyError(err.message));
     } finally {
       setLoading(false);
     }
@@ -90,7 +92,13 @@ export default function Dashboard({ session }) {
           </div>
         )}
 
-        {(loading || isProcessing) && <ProcessingStatus job={currentJob} starting={loading} />}
+        {(loading || isProcessing) && (
+          <ProcessingStages
+            starting={loading}
+            status={currentJob?.status}
+            hasResult={Boolean(currentJob?.result)}
+          />
+        )}
 
         {result && (
           <div className="mt-8">
@@ -161,28 +169,6 @@ export default function Dashboard({ session }) {
           </div>
         )}
       </main>
-    </div>
-  );
-}
-
-function ProcessingStatus({ job, starting }) {
-  const status = starting ? "uploading" : job?.status || "queued";
-  const label = status === "queued" ? "Queued" : status === "processing" ? "Processing" : "Uploading";
-
-  return (
-    <div className="mt-8 rounded-xl border border-indigo-100 bg-indigo-50 p-5">
-      <div className="flex items-center gap-3">
-        <svg className="h-5 w-5 animate-spin text-indigo-600" fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-        </svg>
-        <div>
-          <p className="text-sm font-semibold text-indigo-900">{label} audio</p>
-          <p className="text-sm text-indigo-700">
-            You can open History or leave this page. Processing will continue in the background.
-          </p>
-        </div>
-      </div>
     </div>
   );
 }

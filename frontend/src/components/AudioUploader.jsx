@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { readAudioDuration } from "../utils/audioMeta";
 import { CREDIT_RULES, computeRequiredCredits } from "../utils/credits";
+import UploadTips from "./UploadTips";
 
 export default function AudioUploader({ onSubmit, loading, creditsRemaining }) {
   const [file, setFile] = useState(null);
@@ -91,12 +92,14 @@ export default function AudioUploader({ onSubmit, loading, creditsRemaining }) {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
               </svg>
             </div>
-            <p className="text-gray-600 font-medium">Drop your audio file here</p>
-            <p className="text-sm text-gray-400 mt-1">or click to browse</p>
-            <p className="text-xs text-gray-300 mt-2">MP3, WAV, M4A — up to 25MB</p>
+            <p className="text-gray-700 font-semibold">Upload your audio file</p>
+            <p className="text-sm text-gray-500 mt-1">Drag &amp; drop here, or click to browse</p>
+            <p className="text-xs text-gray-400 mt-2">MP3 • WAV • M4A · up to 25 MB</p>
           </div>
         )}
       </div>
+
+      {!file && <UploadTips />}
 
       {file && (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm">

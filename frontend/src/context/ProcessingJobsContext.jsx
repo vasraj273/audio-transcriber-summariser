@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { createProcessingJob, fetchJobStatus } from "../services/api";
 import { useCredits } from "./CreditsContext";
+import { friendlyError } from "../utils/errorMessage";
 
 const STORAGE_KEY = "audio-transcriber-active-jobs";
 const ProcessingJobsContext = createContext(null);
@@ -22,12 +23,15 @@ export function ProcessingJobsProvider({ children }) {
       for (const job of active) {
         try {
           const status = await fetchJobStatus(job.job_id);
+          const sanitizedStatus = status.error_message
+            ? { ...status, error_message: friendlyError(status.error_message) }
+            : status;
           const merged = {
             ...job,
-            ...status,
-            result: status.status === "completed" ? normaliseJobResult(status) : job.result,
+            ...sanitizedStatus,
+            result: sanitizedStatus.status === "completed" ? normaliseJobResult(sanitizedStatus) : job.result,
           };
-          if (status.status === "failed" && !job.refundProcessed) {
+          if (sanitizedStatus.status === "failed" && !job.refundProcessed) {
             try {
               await refund({ jobId: job.job_id, recordId: job.record_id });
             } catch (refundErr) {
@@ -40,7 +44,7 @@ export function ProcessingJobsProvider({ children }) {
           setJobs((current) => upsertJob(current, {
             ...job,
             status: "failed",
-            error_message: err.message,
+            error_message: friendlyError(err.message),
           }));
         }
       }
