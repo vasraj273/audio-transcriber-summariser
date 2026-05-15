@@ -72,3 +72,17 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     answer: str
+
+
+class AdminCheckResponse(BaseModel):
+    is_admin: bool
+    user_id: str
+
+
+class AdminCreditsAdjustment(BaseModel):
+    mode: str  # "add" | "reset" | "set_total"
+    amount: int = 0
+
+
+class AdminSettingUpdate(BaseModel):
+    value: dict | list | int | float | bool | str | None

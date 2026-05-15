@@ -314,3 +314,46 @@ git diff --check
 - `fetchOrCreateUserCredits` no longer throws on DB failures (missing table, RLS misconfiguration, network blip). Falls back to `defaultCreditsRecord(userId)` so the UI never shows "0 remaining" merely because the row could not be created. Real `used_credits === total_credits` is unaffected — that genuinely shows 0.
 - `deductCreditsForJob` and `refundCreditsForJob` fail-open when the row is unreachable: they log to console and return `{ skipped: true, reason }` / `null` instead of blocking the user. Trade-off chosen so the app stays usable even before `supabase_credits_migration.sql` has been run.
 - Race-condition duplicate-key errors (Postgres code 23505) from the upsert are swallowed silently — they mean another concurrent insert won. Any other upsert error is logged.
+
+### Credit deduction persistence hardening
+- `deductCreditsForJob` no longer throws when the `transcripts.credits_used` guard read errors (e.g. column missing because migration only ran partially). It logs a `console.warn` and proceeds. The `user_credits.used_credits` update is the source of truth; the transcript stamp is best-effort audit/cross-session dedup.
+- `refundCreditsForJob` accepts a `fallbackAmount` argument so refunds still work when `transcripts.credits_used` is unreadable.
+- `CreditsContext` now keeps a `useRef(new Map())` keyed by `jobId` → `{ amount, recordId }`. Deduct adds entries; refund looks up the fallback amount; both delete-on-success. Session-level dedup prevents double-deduction within a single tab even if the DB stamp fails.
+- `Dashboard.handleSubmit` passes `{ jobId, recordId, amount }` to `deduct` and surfaces any deduction error to the UI banner (no longer silent `console.error`).
+- `ProcessingJobsContext` refund call passes `{ jobId, recordId }` for fallback lookup. Refund no longer requires `record_id` to be truthy.
+
+### RLS + Noisy-audio behaviour
+- New migration file `docs/supabase_credits_rls.sql` enables RLS on `user_credits` with three policies scoped to `auth.uid() = user_id`: SELECT, INSERT, UPDATE for `authenticated` role only. Replaces the earlier "DISABLE RLS" stance. Must be run AFTER `supabase_credits_migration.sql` in the Supabase SQL editor.
+- Quality assessment in `backend/services/groq_service.py::assess_transcription_quality` no longer classifies low-quality speech as `noisy_unsupported`. Replaced with three types: `empty_audio` (no meaningful text — blocked), `music_song` (lyrics-heavy with no real conversation — blocked), `noisy_speech` (low score / quality flags but real speech — supported, warned).
+- `is_supported` now returns `False` only for `music_song` and `empty_audio`. Noisy meetings, phone calls, WhatsApp recordings, and low-fidelity audio all transcribe normally and just get an inline amber warning.
+
+### Summary fallback + UX warning
+- `process_audio_file` wraps `summarise_transcript` in try/except. Summary failure (Groq 429, network blip) no longer fails the job. Transcript, segments, speakers all persist; summary becomes "Summary unavailable right now. Transcript was saved successfully." appended to `warning`.
+- `Dashboard.jsx` only renders the heavy `UnsupportedAudioNotice` for `audio_type === "music_song" || audio_type === "empty_audio"`. For everything else (noisy_speech with warning, summary skipped, etc.) it renders a small amber inline banner above the normal transcript/summary UI and continues to render the full result.
+
+### Groq Llama model fallback (TPD resilience)
+- `backend/services/groq_service.py` introduces `_PRIMARY_MODEL = "llama-3.3-70b-versatile"` and `_FALLBACK_MODEL = "llama-3.1-8b-instant"` constants plus a `_llama_complete(messages, temperature)` helper.
+- All Llama call sites — `summarise_transcript`, `infer_speakers`, `_infer_segment_speakers`, `chat_with_audio`, `_run_analysis_prompt` — go through `_llama_complete`. On any 429 / rate-limit / "tokens per day" error from the primary, it transparently retries with the 8B-instant model (separate quota, smaller context, faster).
+- Caller code unchanged. Summaries / chat / compare / merge / speaker inference all keep working when the 70B daily cap is exhausted; quality is slightly lower until the daily reset.
+
+### Usage page + analytics scaffold
+- New `/usage` route and `frontend/src/pages/UsagePage.jsx` show the user their credits, lifetime activity, and recent transcripts. Linked from `Navbar` next to History.
+- New service `frontend/src/services/analytics.js` with `getUserAnalytics(userId)` (aggregates the user's own `transcripts` rows: totalJobs, completedJobs, failedJobs, totalMinutes, totalCreditsSpent, recent[5]) and a stub `getAdminAnalytics()` placeholder for a future admin page (will require a server-side RPC behind an admin role — RLS would otherwise block).
+- New helper components: `UsageStatCard.jsx` (label/value tile with tone variants), `UsageProgressBar.jsx` (percentage bar that turns amber at 80% and red at 100%).
+
+### Customer-friendly UX pass
+- New `frontend/src/utils/errorMessage.js::friendlyError(raw)` maps technical error strings (429 / rate limit / tokens-per-day / fetch failed / unsupported file type / too large / processing failed) to short user-facing messages. Strips JSON payloads and "Error code: NNN" boilerplate. Used by `Dashboard`, `HistoryPage`, and `ProcessingJobsContext` so users never see raw API/stack content.
+- New `frontend/src/components/Tooltip.jsx` (CSS-only hover tooltip) and exported `HelpIcon` component. Used on `CustomizationPanel` Summary Focus dropdown (shows per-option help), `SpeakerModeToggle` (explains the toggle), `CreditsBadge` (explains credit math), and the History `Compare` / `Merge` buttons.
+- New `frontend/src/components/ProcessingStages.jsx` replaces the old single-line "Processing audio" status. Four-step indicator: Uploading audio → Transcribing → Generating summary → Finalizing. Derived from `{ starting, status, hasResult }` + an internal `setInterval` so the visible active step advances past Transcribing after ~20 s of `processing` state (the backend doesn't expose substages).
+- New `frontend/src/components/UploadTips.jsx` shown below the dropzone before file selection: "Great for" pills (Meetings / Interviews / Phone calls / WhatsApp recordings / Lectures / Podcasts), supported formats, and four short tip lines.
+- `HistoryPage` empty state replaced with a friendly bordered card + "Upload Audio" CTA linking to `/dashboard`.
+
+### Transcript delete (single + bulk)
+- New `frontend/src/components/ConfirmModal.jsx` — reusable, backdrop-click cancels, ARIA `role="dialog"`. Replaces `window.confirm` everywhere we delete.
+- New `frontend/src/services/supabase.js::deleteTranscripts(recordIds)` — single round-trip bulk delete via `.delete().in("id", recordIds)`.
+- `HistoryItem.jsx` shows the Delete button on **both** completed and failed cards (not just failed). Uses `ConfirmModal` for the prompt.
+- `HistoryPage.jsx`:
+  - Every record card is selectable (the old completed-only `selectable` restriction was removed). Compare/Merge still filter to completed records via `completedRecords`, so they keep working correctly.
+  - Toolbar is now visible whenever `records.length > 0` (not just when there are 2+ completed records or something selected).
+  - New "Select all" / "Deselect all" toggle.
+  - New red `Delete (N)` bulk button — appears whenever any rows are selected, visually separated from Compare/Merge by a thin vertical divider. Confirms via `ConfirmModal` then calls `deleteTranscripts(selectedIds)`, optimistically prunes local state, and clears the selection.

@@ -1,9 +1,11 @@
 import { Link, useLocation } from "react-router-dom";
 import { supabase } from "../services/supabase";
+import { useAdmin } from "../context/AdminContext";
 import CreditsBadge from "./CreditsBadge";
 
 export default function Navbar({ session }) {
   const location = useLocation();
+  const { isAdmin } = useAdmin();
   const userEmail = session?.user?.email;
   const avatarUrl = session?.user?.user_metadata?.avatar_url;
 
@@ -42,6 +44,7 @@ export default function Navbar({ session }) {
             {navLink("/dashboard", "Transcribe")}
             {navLink("/history", "History")}
             {navLink("/usage", "Usage")}
+            {isAdmin && navLink("/admin", "Admin")}
           </div>
         </div>
 
