@@ -4,7 +4,7 @@ import HistoryItem from "../components/HistoryItem";
 import TranscriptAnalysisModal from "../components/TranscriptAnalysisModal";
 import { useProcessingJobs } from "../context/ProcessingJobsContext";
 import { compareTranscripts, mergeTranscripts } from "../services/api";
-import { fetchHistory } from "../services/supabase";
+import { deleteTranscript, fetchHistory } from "../services/supabase";
 
 export default function HistoryPage({ session }) {
   const [records, setRecords] = useState([]);
@@ -46,6 +46,16 @@ export default function HistoryPage({ session }) {
         ? current.filter((selectedId) => selectedId !== id)
         : [...current, id]
     );
+  }
+
+  async function handleDelete(recordId) {
+    try {
+      await deleteTranscript(recordId);
+      setRecords((current) => current.filter((record) => record.id !== recordId));
+      setSelectedIds((current) => current.filter((id) => id !== recordId));
+    } catch (err) {
+      setError(err.message);
+    }
   }
 
   async function runAnalysis(mode) {
@@ -147,6 +157,7 @@ export default function HistoryPage({ session }) {
                   selectable={selectable}
                   selected={selectedIds.includes(record.id)}
                   onSelect={toggleSelected}
+                  onDelete={handleDelete}
                 />
               );
             })}

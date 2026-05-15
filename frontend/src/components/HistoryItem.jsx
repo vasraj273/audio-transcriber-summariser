@@ -1,17 +1,26 @@
 import { useState } from "react";
 import { downloadPDF } from "../utils/downloadPDF";
+import { getRecordState, isRecordCompleted } from "../utils/recordStatus";
 import Markdown from "./Markdown";
 
-export default function HistoryItem({ record, selectable = false, selected = false, onSelect }) {
+export default function HistoryItem({ record, selectable = false, selected = false, onSelect, onDelete }) {
   const [expanded, setExpanded] = useState(false);
 
   const date = new Date(record.created_at).toLocaleDateString("en-GB", {
     day: "numeric", month: "short", year: "numeric",
   });
+  const recordState = getRecordState(record);
+  const completed = isRecordCompleted(record);
   const transcriptForExport =
     record.speaker_count >= 2 && record.speaker_transcript
       ? record.speaker_transcript
       : record.transcript;
+
+  function handleDeleteClick() {
+    if (!onDelete) return;
+    const confirmed = window.confirm("Delete this failed transcript? This cannot be undone.");
+    if (confirmed) onDelete(record.id);
+  }
 
   return (
     <div className={`bg-white rounded-xl border shadow-sm p-6 transition-colors ${
@@ -43,39 +52,60 @@ export default function HistoryItem({ record, selectable = false, selected = fal
               </span>
             )}
           </div>
-          {!expanded && (
+          {recordState === "failed" && record.error_message && (
+            <p className="text-xs text-red-600 mt-2 line-clamp-2">{record.error_message}</p>
+          )}
+          {completed && !expanded && (
             <p className="text-sm text-gray-500 mt-2 line-clamp-2">{record.summary}</p>
           )}
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
-          <button
-            onClick={() => downloadPDF({
-              audioName: record.audio_name,
-              createdAt: record.created_at,
-              transcript: transcriptForExport,
-              summary: record.summary,
-              keyPoints: record.key_points,
-            })}
-            disabled={record.status && record.status !== "completed"}
-            className="flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-800 font-medium transition-colors"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-            PDF
-          </button>
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="text-sm text-gray-500 hover:text-gray-800 font-medium transition-colors"
-          >
-            {expanded ? "Collapse" : "View Details"}
-          </button>
+          {completed && (
+            <>
+              <button
+                onClick={() => downloadPDF({
+                  audioName: record.audio_name,
+                  createdAt: record.created_at,
+                  transcript: transcriptForExport,
+                  summary: record.summary,
+                  keyPoints: record.key_points,
+                })}
+                className="flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-800 font-medium transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                PDF
+              </button>
+              <button
+                onClick={() => setExpanded(!expanded)}
+                className="text-sm text-gray-500 hover:text-gray-800 font-medium transition-colors"
+              >
+                {expanded ? "Collapse" : "View Details"}
+              </button>
+            </>
+          )}
+          {recordState === "failed" && (
+            <button
+              onClick={handleDeleteClick}
+              className="flex items-center gap-1 text-sm text-red-600 hover:text-red-800 font-medium transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
+              </svg>
+              Delete
+            </button>
+          )}
+          {(recordState === "processing" || recordState === "queued") && (
+            <span className="text-xs italic text-indigo-500">Processing…</span>
+          )}
         </div>
       </div>
 
-      {expanded && (
+      {completed && expanded && (
         <div className="mt-5 flex flex-col gap-4 border-t border-gray-100 pt-5">
           <div>
             <h3 className="text-sm font-semibold text-gray-700 mb-1">Summary</h3>

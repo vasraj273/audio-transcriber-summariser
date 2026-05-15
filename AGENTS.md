@@ -279,3 +279,12 @@ git diff --check
 - `process_audio_file` now calls the helper instead of AssemblyAI directly.
 - Production logging via `logging` module: INFO on pipeline start + Groq fallback success; WARNING on AssemblyAI failure; ERROR (`logger.exception`) when both engines fail. No `print()` statements anywhere. No temporary debug logs.
 - Net effect: Render env-var-still-missing, AssemblyAI free-tier exhaustion, transient network outages, or AssemblyAI-specific format quirks no longer surface as "Processing failed" — they degrade silently to Groq Whisper transcription. Speaker mode is preserved either way (native diarization on AssemblyAI path, Llama-inferred on Groq path).
+
+### History card action gating
+- New helper `frontend/src/utils/recordStatus.js` exposes `getRecordState(record)` returning `"completed" | "failed" | "processing" | "queued" | "unknown"`, plus `isRecordCompleted(record)` (completed AND transcript text present). Single source of truth for action-button visibility across the History page.
+- `HistoryItem.jsx` now hides PDF + View Details unless the record is `completed`. The expanded summary/key-points/transcript panel is also gated by `completed && expanded` so it can never render an empty body for partial rows.
+- Failed records render a destructive `Delete` action (with `window.confirm` guard) instead of dead buttons. `error_message` is surfaced inline in red beneath the badges so users know why the job failed. Processing/queued records render a small italic `Processing…` indicator in the action area.
+- Retry was intentionally **not** implemented because uploaded audio is not persisted server-side — a "retry" would always require the user to re-upload from the Dashboard, which is what the Transcribe page already does.
+- Delete goes through `frontend/src/services/supabase.js::deleteTranscript(recordId)` which performs a direct row delete via the Supabase JS client. `HistoryPage.handleDelete` optimistically removes the row from local state and prunes it from the selection list. No backend route required.
+- Compare/merge selection logic is unchanged: `HistoryPage` still only sets `selectable` for records where `status === "completed" && record.transcript`, so failed/processing/queued cards still cannot enter compare/merge.
+- Frontend build (`npm.cmd run build`) passes after these changes.

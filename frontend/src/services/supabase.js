@@ -113,3 +113,8 @@ function parseJson(value, fallback) {
     return fallback;
   }
 }
+
+export async function deleteTranscript(recordId) {
+  const { error } = await supabase.from("transcripts").delete().eq("id", recordId);
+  if (error) throw new Error(error.message || "Failed to delete transcript.");
+}
