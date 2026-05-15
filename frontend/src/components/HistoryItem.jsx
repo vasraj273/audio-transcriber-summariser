@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { downloadPDF } from "../utils/downloadPDF";
 import { getRecordState, isRecordCompleted } from "../utils/recordStatus";
+import ConfirmModal from "./ConfirmModal";
 import Markdown from "./Markdown";
 
 export default function HistoryItem({ record, selectable = false, selected = false, onSelect, onDelete }) {
@@ -16,10 +17,16 @@ export default function HistoryItem({ record, selectable = false, selected = fal
       ? record.speaker_transcript
       : record.transcript;
 
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
   function handleDeleteClick() {
     if (!onDelete) return;
-    const confirmed = window.confirm("Delete this failed transcript? This cannot be undone.");
-    if (confirmed) onDelete(record.id);
+    setConfirmOpen(true);
+  }
+
+  function handleConfirmDelete() {
+    setConfirmOpen(false);
+    onDelete(record.id);
   }
 
   return (
@@ -87,10 +94,11 @@ export default function HistoryItem({ record, selectable = false, selected = fal
               </button>
             </>
           )}
-          {recordState === "failed" && (
+          {(completed || recordState === "failed") && onDelete && (
             <button
               onClick={handleDeleteClick}
               className="flex items-center gap-1 text-sm text-red-600 hover:text-red-800 font-medium transition-colors"
+              aria-label="Delete transcript"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -134,6 +142,14 @@ export default function HistoryItem({ record, selectable = false, selected = fal
           </div>
         </div>
       )}
+      <ConfirmModal
+        open={confirmOpen}
+        title="Delete transcript?"
+        message="This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setConfirmOpen(false)}
+      />
     </div>
   );
 }

@@ -118,3 +118,9 @@ export async function deleteTranscript(recordId) {
   const { error } = await supabase.from("transcripts").delete().eq("id", recordId);
   if (error) throw new Error(error.message || "Failed to delete transcript.");
 }
+
+export async function deleteTranscripts(recordIds) {
+  if (!recordIds || recordIds.length === 0) return;
+  const { error } = await supabase.from("transcripts").delete().in("id", recordIds);
+  if (error) throw new Error(error.message || "Failed to delete transcripts.");
+}

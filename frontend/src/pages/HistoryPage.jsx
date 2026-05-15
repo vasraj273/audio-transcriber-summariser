@@ -5,7 +5,8 @@ import TranscriptAnalysisModal from "../components/TranscriptAnalysisModal";
 import { useProcessingJobs } from "../context/ProcessingJobsContext";
 import { Link } from "react-router-dom";
 import { compareTranscripts, mergeTranscripts } from "../services/api";
-import { deleteTranscript, fetchHistory } from "../services/supabase";
+import { deleteTranscript, deleteTranscripts, fetchHistory } from "../services/supabase";
+import ConfirmModal from "../components/ConfirmModal";
 import Tooltip from "../components/Tooltip";
 import { friendlyError } from "../utils/errorMessage";
 
@@ -19,6 +20,7 @@ export default function HistoryPage({ session }) {
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState("");
   const [analysisRecords, setAnalysisRecords] = useState([]);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const { activeJobs } = useProcessingJobs();
 
   useEffect(() => {
@@ -56,6 +58,17 @@ export default function HistoryPage({ session }) {
       await deleteTranscript(recordId);
       setRecords((current) => current.filter((record) => record.id !== recordId));
       setSelectedIds((current) => current.filter((id) => id !== recordId));
+    } catch (err) {
+      setError(friendlyError(err.message));
+    }
+  }
+
+  async function handleBulkDelete() {
+    setBulkDeleteOpen(false);
+    try {
+      await deleteTranscripts(selectedIds);
+      setRecords((current) => current.filter((record) => !selectedIds.includes(record.id)));
+      setSelectedIds([]);
     } catch (err) {
       setError(friendlyError(err.message));
     }
@@ -99,27 +112,56 @@ export default function HistoryPage({ session }) {
               <p className="text-gray-500 mt-1 text-sm">Your past transcriptions and summaries.</p>
             </div>
 
-            {completedRecords.length >= 2 && (
+            {records.length > 0 && (
               <div className="flex w-full flex-wrap items-center gap-2 rounded-xl border border-gray-200 bg-white p-2 shadow-sm md:w-auto">
                 <span className="px-2 text-sm font-medium text-gray-500">{selectedCount} selected</span>
-                <Tooltip text="Compare selected transcripts side by side." placement="bottom">
-                  <button
-                    onClick={() => runAnalysis("compare")}
-                    disabled={selectedCount < 2 || analysisLoading}
-                    className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    Compare
-                  </button>
-                </Tooltip>
-                <Tooltip text="Combine notes from multiple transcripts into one." placement="bottom">
-                  <button
-                    onClick={() => runAnalysis("merge")}
-                    disabled={selectedCount < 2 || analysisLoading}
-                    className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    Merge
-                  </button>
-                </Tooltip>
+                <button
+                  onClick={() => {
+                    if (selectedCount === records.length) {
+                      setSelectedIds([]);
+                    } else {
+                      setSelectedIds(records.map((record) => record.id));
+                    }
+                  }}
+                  className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50"
+                >
+                  {selectedCount === records.length ? "Deselect all" : "Select all"}
+                </button>
+                {completedRecords.length >= 2 && (
+                  <>
+                    <Tooltip text="Compare selected transcripts side by side." placement="bottom">
+                      <button
+                        onClick={() => runAnalysis("compare")}
+                        disabled={selectedCount < 2 || analysisLoading}
+                        className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Compare
+                      </button>
+                    </Tooltip>
+                    <Tooltip text="Combine notes from multiple transcripts into one." placement="bottom">
+                      <button
+                        onClick={() => runAnalysis("merge")}
+                        disabled={selectedCount < 2 || analysisLoading}
+                        className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Merge
+                      </button>
+                    </Tooltip>
+                  </>
+                )}
+                {selectedCount > 0 && (
+                  <>
+                    {completedRecords.length >= 2 && (
+                      <span className="h-5 w-px bg-gray-200" aria-hidden="true" />
+                    )}
+                    <button
+                      onClick={() => setBulkDeleteOpen(true)}
+                      className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700"
+                    >
+                      Delete ({selectedCount})
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -166,19 +208,16 @@ export default function HistoryPage({ session }) {
 
         {!loading && records.length > 0 && (
           <div className="flex flex-col gap-4">
-            {records.map((record) => {
-              const selectable = (record.status || "completed") === "completed" && Boolean(record.transcript);
-              return (
-                <HistoryItem
-                  key={record.id}
-                  record={record}
-                  selectable={selectable}
-                  selected={selectedIds.includes(record.id)}
-                  onSelect={toggleSelected}
-                  onDelete={handleDelete}
-                />
-              );
-            })}
+            {records.map((record) => (
+              <HistoryItem
+                key={record.id}
+                record={record}
+                selectable
+                selected={selectedIds.includes(record.id)}
+                onSelect={toggleSelected}
+                onDelete={handleDelete}
+              />
+            ))}
           </div>
         )}
       </main>
@@ -190,6 +229,14 @@ export default function HistoryPage({ session }) {
         loading={analysisLoading}
         error={analysisError}
         onClose={() => setAnalysisMode("")}
+      />
+      <ConfirmModal
+        open={bulkDeleteOpen}
+        title={`Delete ${selectedCount} transcript${selectedCount === 1 ? "" : "s"}?`}
+        message="This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={handleBulkDelete}
+        onCancel={() => setBulkDeleteOpen(false)}
       />
     </div>
   );
