@@ -21,6 +21,7 @@ class ProcessResponse(BaseModel):
     quality_score: float = 1.0
     quality_flags: List[str] = []
     warning: str = ""
+    duration_seconds: float = 0.0
 
 
 class JobCreateResponse(BaseModel):
@@ -46,6 +47,7 @@ class JobStatusResponse(BaseModel):
     quality_flags: List[str] = []
     error_message: str = ""
     warning: str = ""
+    duration_seconds: float = 0.0
 
 
 class TranscriptAnalysisRequest(BaseModel):

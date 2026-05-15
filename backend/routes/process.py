@@ -2,11 +2,12 @@ import os
 import tempfile
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from models.schemas import ProcessResponse
+from services.assemblyai_service import transcribe_audio
 from services.groq_service import (
+    _build_speaker_transcript,
     assess_transcription_quality,
     infer_speakers,
     summarise_transcript,
-    transcribe_audio,
 )
 
 router = APIRouter()
@@ -72,17 +73,7 @@ def process_audio_file(file_path: str, options: dict) -> dict:
         length=options.get("summary_length", "Medium"),
         custom_focus=options.get("custom_focus", ""),
     )
-    try:
-        speaker_result = infer_speakers(transcription["text"], transcription["segments"])
-    except Exception:
-        speaker_result = {
-            "speaker_transcript": transcription["text"],
-            "speaker_count": 1,
-            "segments": [
-                {**segment, "speaker": "Speaker 1"}
-                for segment in transcription["segments"]
-            ],
-        }
+    speaker_result = _resolve_speakers(transcription)
 
     return {
         "transcript": transcription["text"],
@@ -98,6 +89,30 @@ def process_audio_file(file_path: str, options: dict) -> dict:
         "warning": quality["warning"],
         "duration_seconds": transcription.get("duration", 0),
     }
+
+
+def _resolve_speakers(transcription: dict) -> dict:
+    segments = transcription.get("segments") or []
+    text = transcription.get("text") or ""
+
+    has_native_speakers = any((segment.get("speaker") or "").strip() for segment in segments)
+
+    if has_native_speakers:
+        labels = {segment["speaker"] for segment in segments if segment.get("speaker")}
+        return {
+            "speaker_transcript": _build_speaker_transcript(segments),
+            "speaker_count": max(len(labels), 1),
+            "segments": segments,
+        }
+
+    try:
+        return infer_speakers(text, segments)
+    except Exception:
+        return {
+            "speaker_transcript": text,
+            "speaker_count": 1,
+            "segments": [{**segment, "speaker": "Speaker 1"} for segment in segments],
+        }
 
 
 def _validate_file(file: UploadFile):
