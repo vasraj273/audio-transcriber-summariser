@@ -1,15 +1,18 @@
+import logging
 import os
 import tempfile
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from models.schemas import ProcessResponse
-from services.assemblyai_service import transcribe_audio
+from services.assemblyai_service import transcribe_audio as assemblyai_transcribe_audio
 from services.groq_service import (
     _build_speaker_transcript,
     assess_transcription_quality,
     infer_speakers,
     summarise_transcript,
+    transcribe_audio as groq_transcribe_audio,
 )
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 ALLOWED_EXTENSIONS = {".mp3", ".wav", ".m4a"}
@@ -46,7 +49,7 @@ async def process_audio(
 
 
 def process_audio_file(file_path: str, options: dict) -> dict:
-    transcription = transcribe_audio(file_path)
+    transcription = _transcribe_with_fallback(file_path)
     quality = assess_transcription_quality(transcription)
 
     if not quality["is_supported"]:
@@ -89,6 +92,26 @@ def process_audio_file(file_path: str, options: dict) -> dict:
         "warning": quality["warning"],
         "duration_seconds": transcription.get("duration", 0),
     }
+
+
+def _transcribe_with_fallback(file_path: str) -> dict:
+    logger.info("Transcription pipeline starting for %s.", os.path.basename(file_path))
+    try:
+        return assemblyai_transcribe_audio(file_path)
+    except Exception as exc:
+        logger.warning(
+            "AssemblyAI transcription failed (%s). Falling back to Groq Whisper.",
+            exc,
+        )
+        try:
+            result = groq_transcribe_audio(file_path)
+            logger.info("Groq Whisper fallback transcription succeeded.")
+            return result
+        except Exception as fallback_exc:
+            logger.exception("Both AssemblyAI and Groq Whisper transcription failed.")
+            raise RuntimeError(
+                f"Transcription failed. AssemblyAI error: {exc}. Groq Whisper fallback error: {fallback_exc}."
+            ) from fallback_exc
 
 
 def _resolve_speakers(transcription: dict) -> dict:
