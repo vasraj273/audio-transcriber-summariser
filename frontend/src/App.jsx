@@ -4,6 +4,7 @@ import { supabase } from "./services/supabase";
 import LoginPage from "./pages/LoginPage";
 import Dashboard from "./pages/Dashboard";
 import HistoryPage from "./pages/HistoryPage";
+import UsagePage from "./pages/UsagePage";
 import { ProcessingJobsProvider } from "./context/ProcessingJobsContext";
 import { CreditsProvider } from "./context/CreditsContext";
 
@@ -47,6 +48,10 @@ export default function App() {
           <Route
             path="/history"
             element={session ? <HistoryPage session={session} /> : <Navigate to="/" />}
+          />
+          <Route
+            path="/usage"
+            element={session ? <UsagePage session={session} /> : <Navigate to="/" />}
           />
           </Routes>
         </ProcessingJobsProvider>

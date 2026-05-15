@@ -41,6 +41,7 @@ export default function Navbar({ session }) {
           <div className="flex items-center gap-5">
             {navLink("/dashboard", "Transcribe")}
             {navLink("/history", "History")}
+            {navLink("/usage", "Usage")}
           </div>
         </div>
 
