@@ -1,11 +1,13 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { createProcessingJob, fetchJobStatus } from "../services/api";
+import { useCredits } from "./CreditsContext";
 
 const STORAGE_KEY = "audio-transcriber-active-jobs";
 const ProcessingJobsContext = createContext(null);
 
 export function ProcessingJobsProvider({ children }) {
   const [jobs, setJobs] = useState(() => loadStoredJobs());
+  const { refund } = useCredits();
 
   useEffect(() => {
     const storedJobs = jobs.map(({ audioUrl, file, result, ...job }) => job);
@@ -20,11 +22,20 @@ export function ProcessingJobsProvider({ children }) {
       for (const job of active) {
         try {
           const status = await fetchJobStatus(job.job_id);
-          setJobs((current) => upsertJob(current, {
+          const merged = {
             ...job,
             ...status,
             result: status.status === "completed" ? normaliseJobResult(status) : job.result,
-          }));
+          };
+          if (status.status === "failed" && !job.refundProcessed) {
+            try {
+              await refund({ jobId: job.job_id, recordId: job.record_id });
+            } catch (refundErr) {
+              console.error("[Credits] refund failed:", refundErr.message);
+            }
+            merged.refundProcessed = true;
+          }
+          setJobs((current) => upsertJob(current, merged));
         } catch (err) {
           setJobs((current) => upsertJob(current, {
             ...job,

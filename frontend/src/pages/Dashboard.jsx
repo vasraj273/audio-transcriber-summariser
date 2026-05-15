@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useProcessingJobs } from "../context/ProcessingJobsContext";
+import { useCredits } from "../context/CreditsContext";
+import { computeRequiredCredits } from "../utils/credits";
 import { downloadPDF } from "../utils/downloadPDF";
 import Navbar from "../components/Navbar";
 import AudioUploader from "../components/AudioUploader";
@@ -24,12 +26,19 @@ export default function Dashboard({ session }) {
   const [options, setOptions] = useState(DEFAULT_OPTIONS);
   const [chatSessionId, setChatSessionId] = useState(0);
   const { jobs, startJob } = useProcessingJobs();
+  const { remaining, deduct } = useCredits();
 
   const currentJob = jobs.find((job) => job.job_id === currentJobId) || jobs[0];
   const result = currentJob?.result || null;
   const isProcessing = Boolean(currentJob && ["queued", "processing"].includes(currentJob.status));
 
-  async function handleSubmit(file) {
+  async function handleSubmit(file, durationSeconds) {
+    const required = computeRequiredCredits(durationSeconds);
+    if (required > remaining) {
+      setError("Insufficient credits remaining.");
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setChatSessionId((id) => id + 1);
@@ -37,6 +46,14 @@ export default function Dashboard({ session }) {
     try {
       const job = await startJob({ file, userId: session.user.id, options });
       setCurrentJobId(job.job_id);
+      if (required > 0 && job?.job_id) {
+        try {
+          await deduct({ jobId: job.job_id, recordId: job.record_id, amount: required });
+        } catch (err) {
+          setError(err.message || "Credits could not be deducted.");
+          console.error("[Credits] Deduction failed:", err.message);
+        }
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -65,7 +82,7 @@ export default function Dashboard({ session }) {
 
         <CustomizationPanel options={options} setOptions={setOptions} disabled={loading || isProcessing} />
 
-        <AudioUploader onSubmit={handleSubmit} loading={loading || isProcessing} />
+        <AudioUploader onSubmit={handleSubmit} loading={loading || isProcessing} creditsRemaining={remaining} />
 
         {error && (
           <div className="mt-6 bg-red-50 border border-red-200 rounded-xl p-4 text-red-700 text-sm">

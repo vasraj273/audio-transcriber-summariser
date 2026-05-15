@@ -1,7 +1,11 @@
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
+import { readAudioDuration } from "../utils/audioMeta";
+import { CREDIT_RULES, computeRequiredCredits } from "../utils/credits";
 
-export default function AudioUploader({ onSubmit, loading }) {
+export default function AudioUploader({ onSubmit, loading, creditsRemaining }) {
   const [file, setFile] = useState(null);
+  const [duration, setDuration] = useState(null);
+  const [durationError, setDurationError] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef(null);
 
@@ -13,7 +17,22 @@ export default function AudioUploader({ onSubmit, loading }) {
       return;
     }
     setFile(selected);
+    setDuration(null);
+    setDurationError("");
   }
+
+  useEffect(() => {
+    if (!file) return;
+    let cancelled = false;
+    readAudioDuration(file)
+      .then((seconds) => { if (!cancelled) setDuration(seconds); })
+      .catch((err) => {
+        if (cancelled) return;
+        setDuration(0);
+        setDurationError(err.message || "Could not read audio length.");
+      });
+    return () => { cancelled = true; };
+  }, [file]);
 
   function handleDrop(e) {
     e.preventDefault();
@@ -22,10 +41,16 @@ export default function AudioUploader({ onSubmit, loading }) {
   }
 
   function handleSubmit() {
-    if (file) onSubmit(file);
+    if (!file || duration === null) return;
+    if (insufficient) return;
+    onSubmit(file, duration || 0);
   }
 
   const fileSizeMB = file ? (file.size / (1024 * 1024)).toFixed(2) : null;
+  const required = duration !== null ? computeRequiredCredits(duration) : 0;
+  const hasRemainingInfo = typeof creditsRemaining === "number";
+  const insufficient = hasRemainingInfo && required > 0 && required > creditsRemaining;
+  const lowAfter = hasRemainingInfo && required > 0 && !insufficient && (creditsRemaining - required) <= CREDIT_RULES.warningThreshold;
 
   return (
     <div className="w-full">
@@ -73,9 +98,41 @@ export default function AudioUploader({ onSubmit, loading }) {
         )}
       </div>
 
+      {file && (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-gray-500">
+              Credits required:{" "}
+              <strong className={insufficient ? "text-red-600" : "text-indigo-700"}>
+                {duration === null ? "…" : required}
+              </strong>
+            </span>
+            {hasRemainingInfo && (
+              <span className="text-xs text-gray-400">
+                (you have {creditsRemaining} remaining)
+              </span>
+            )}
+          </div>
+          {durationError && (
+            <span className="text-xs text-amber-700">{durationError}</span>
+          )}
+        </div>
+      )}
+
+      {insufficient && (
+        <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          Insufficient credits remaining.
+        </div>
+      )}
+      {lowAfter && (
+        <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          You will be low on credits after this job. Consider shorter audio next time.
+        </div>
+      )}
+
       <button
         onClick={handleSubmit}
-        disabled={!file || loading}
+        disabled={!file || loading || duration === null || insufficient}
         className="mt-4 w-full bg-indigo-600 text-white font-semibold py-3 rounded-xl
           hover:bg-indigo-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed
           flex items-center justify-center gap-2"

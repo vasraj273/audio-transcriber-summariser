@@ -5,6 +5,7 @@ import LoginPage from "./pages/LoginPage";
 import Dashboard from "./pages/Dashboard";
 import HistoryPage from "./pages/HistoryPage";
 import { ProcessingJobsProvider } from "./context/ProcessingJobsContext";
+import { CreditsProvider } from "./context/CreditsContext";
 
 export default function App() {
   const [session, setSession] = useState(undefined);
@@ -32,8 +33,9 @@ export default function App() {
 
   return (
     <BrowserRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
-      <ProcessingJobsProvider>
-        <Routes>
+      <CreditsProvider userId={session?.user?.id}>
+        <ProcessingJobsProvider>
+          <Routes>
           <Route
             path="/"
             element={session ? <Navigate to="/dashboard" /> : <LoginPage />}
@@ -46,8 +48,9 @@ export default function App() {
             path="/history"
             element={session ? <HistoryPage session={session} /> : <Navigate to="/" />}
           />
-        </Routes>
-      </ProcessingJobsProvider>
+          </Routes>
+        </ProcessingJobsProvider>
+      </CreditsProvider>
     </BrowserRouter>
   );
 }

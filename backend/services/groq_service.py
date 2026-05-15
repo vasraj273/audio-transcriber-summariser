@@ -88,29 +88,39 @@ def assess_transcription_quality(transcription: dict) -> dict:
         score -= 0.12
     score = max(0.0, min(1.0, score))
 
-    if "low_speech_density" in flags and ("unstable_mixed_scripts" in flags or "repeated_phrase_hallucination" in flags):
+    has_meaningful_text = bool(text) and word_count >= 3
+    looks_like_music = (
+        "low_speech_density" in flags
+        and ("unstable_mixed_scripts" in flags or "repeated_phrase_hallucination" in flags)
+    )
+
+    if not has_meaningful_text:
+        audio_type = "empty_audio"
+    elif looks_like_music and word_count < 60:
         audio_type = "music_song"
-    elif score < 0.45 or "very_little_speech_detected" in flags:
-        audio_type = "noisy_unsupported"
     elif _looks_like_interview_or_podcast(text):
         audio_type = "podcast_interview"
     elif _looks_like_meeting(text):
         audio_type = "meeting_call"
+    elif flags or score < 0.7:
+        audio_type = "noisy_speech"
     else:
         audio_type = "speech_conversation"
 
     warning = ""
     if audio_type == "music_song":
         warning = "This audio appears to be music/song content. Accurate speech transcription may not be possible."
-    elif audio_type == "noisy_unsupported":
-        warning = "This audio does not appear to contain clear speech. Accurate transcription may not be possible."
+    elif audio_type == "empty_audio":
+        warning = "This audio does not appear to contain any speech."
+    elif audio_type == "noisy_speech":
+        warning = "Background noise detected. Transcript accuracy may be reduced."
 
     return {
         "audio_type": audio_type,
         "quality_score": round(score, 2),
         "quality_flags": flags,
         "warning": warning,
-        "is_supported": audio_type not in {"music_song", "noisy_unsupported"} and score >= 0.35,
+        "is_supported": audio_type not in {"music_song", "empty_audio"},
     }
 
 

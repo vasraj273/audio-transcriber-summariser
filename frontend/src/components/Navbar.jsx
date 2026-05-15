@@ -1,5 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import { supabase } from "../services/supabase";
+import CreditsBadge from "./CreditsBadge";
 
 export default function Navbar({ session }) {
   const location = useLocation();
@@ -44,6 +45,7 @@ export default function Navbar({ session }) {
         </div>
 
         <div className="flex items-center gap-3">
+          <CreditsBadge />
           {avatarUrl && (
             <img src={avatarUrl} alt="avatar" className="w-8 h-8 rounded-full" />
           )}

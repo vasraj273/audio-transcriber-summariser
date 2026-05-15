@@ -1,0 +1,16 @@
+-- Adds credit tracking. Run inside Supabase SQL editor once.
+
+CREATE TABLE IF NOT EXISTS user_credits (
+  user_id UUID PRIMARY KEY,
+  total_credits INTEGER NOT NULL DEFAULT 100,
+  used_credits INTEGER NOT NULL DEFAULT 0,
+  last_reset_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+  plan TEXT NOT NULL DEFAULT 'free',
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+  updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);
+
+ALTER TABLE user_credits DISABLE ROW LEVEL SECURITY;
+
+ALTER TABLE transcripts ADD COLUMN IF NOT EXISTS credits_used INTEGER DEFAULT 0;
+ALTER TABLE transcripts ADD COLUMN IF NOT EXISTS credits_refunded BOOLEAN DEFAULT FALSE;

@@ -4,7 +4,8 @@
       "Bash(python -c \"import assemblyai; print\\(assemblyai.__version__\\)\")",
       "Bash(python -c \"import assemblyai as aai; print\\(dir\\(aai.TranscriptionConfig\\)\\)\")",
       "Bash(C:/projects/audio-transcriber-summariser/backend/venv/Scripts/python.exe *)",
-      "PowerShell(Get-Content \"C:\\\\projects\\\\audio-transcriber-summariser\\\\backend\\\\.env\" -ErrorAction SilentlyContinue; if \\(-not \\(Test-Path \"C:\\\\projects\\\\audio-transcriber-summariser\\\\backend\\\\.env\"\\)\\) { Write-Output \"FILE NOT FOUND\" })"
+      "PowerShell(Get-Content \"C:\\\\projects\\\\audio-transcriber-summariser\\\\backend\\\\.env\" -ErrorAction SilentlyContinue; if \\(-not \\(Test-Path \"C:\\\\projects\\\\audio-transcriber-summariser\\\\backend\\\\.env\"\\)\\) { Write-Output \"FILE NOT FOUND\" })",
+      "Bash(npm.cmd run *)"
     ]
   }
 }

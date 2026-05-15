@@ -213,6 +213,8 @@ git diff --check
    - `AssemblyAI transcription starting: <file>`
    - `AssemblyAI transcription complete: id=... language=... segments=N duration=...s`
 3. Run/confirm `docs/supabase_processing_migration.sql` in Supabase before relying on job persistence.
+3a. **Run `docs/supabase_credits_migration.sql` in Supabase** — creates `user_credits` table and adds `credits_used` + `credits_refunded` to `transcripts`. Without this the credit/usage feature throws on first load.
+3b. Harden `user_credits` access with RLS + Supabase RPC for deduction/refund so the anon browser key cannot tamper with any other user's row. Currently the feature is honour-system trustworthy only because the schema is shipped with RLS disabled to match `transcripts`.
 4. Set up cron-job.org keep-alive hitting `https://audio-transcriber-summariser.onrender.com/ping` every 10 minutes.
 5. Spot-check Brave/Chrome permission popup remains gone.
 6. Test real uploads after migration: speech, song/music, noisy audio, multi-speaker meeting.
@@ -288,3 +290,27 @@ git diff --check
 - Delete goes through `frontend/src/services/supabase.js::deleteTranscript(recordId)` which performs a direct row delete via the Supabase JS client. `HistoryPage.handleDelete` optimistically removes the row from local state and prunes it from the selection list. No backend route required.
 - Compare/merge selection logic is unchanged: `HistoryPage` still only sets `selectable` for records where `status === "completed" && record.transcript`, so failed/processing/queued cards still cannot enter compare/merge.
 - Frontend build (`npm.cmd run build`) passes after these changes.
+
+### Credit / Usage System
+- Storage: new Supabase table `user_credits` (`user_id` PK, `total_credits`, `used_credits`, `last_reset_at`, `plan`, `created_at`, `updated_at`). Two new columns on `transcripts`: `credits_used INTEGER DEFAULT 0`, `credits_refunded BOOLEAN DEFAULT FALSE`. Migration file: `docs/supabase_credits_migration.sql` — must be run in Supabase SQL editor before the feature works.
+- Rules live in `frontend/src/utils/credits.js` (`CREDIT_RULES`): new-user grant 100, cost 2 credits per minute, warning threshold 20, daily reset (UTC), plan `free`. Centralised — bump rates or plan caps here.
+- Formula: `Math.max(1, Math.ceil(durationSeconds / 60 * creditsPerMinute))`. Even sub-minute audio costs 1 credit so the system can't be gamed with tiny clips.
+- Pre-flight duration: `frontend/src/utils/audioMeta.js::readAudioDuration(file)` uses a hidden `<audio preload="metadata">` element with an object URL.
+- State: `CreditsProvider` (in `frontend/src/context/CreditsContext.jsx`) is mounted in `App.jsx` OUTSIDE `ProcessingJobsProvider` because the jobs provider calls `useCredits().refund(...)` when a polled job flips to `failed`. Provider must remain in that order.
+- Daily reset: `fetchOrCreateUserCredits` checks `shouldResetToday` on every load and zeroes `used_credits` + bumps `last_reset_at` on UTC date rollover. Reset is purely client-driven for now (matches the existing frontend-owned DB pattern).
+- Deduction happens in `Dashboard.jsx::handleSubmit` AFTER `createProcessingJob` returns a `record_id`. Backend is not aware of credits — entirely frontend-driven, same pattern as `saveTranscript`. Deduction is idempotent: `deductCreditsForJob` rejects a second call against the same `record_id` because `transcripts.credits_used` is already > 0.
+- Refund: when a job's status flips to `failed`, `ProcessingJobsProvider` calls `refund({ recordId })`. Idempotent via `transcripts.credits_refunded` column AND an in-memory `refundProcessed` flag on the job state. Old records (pre-feature) have `credits_used = 0` so refund is a no-op.
+- UI:
+  - `Navbar` shows `CreditsBadge`: pill with `Remaining: X/Total` (amber when below threshold) plus `Used today: Y` (hidden on small screens).
+  - `AudioUploader` shows `Credits required: X` after the audio metadata loads. Red "Insufficient credits remaining." banner + disabled submit when required > remaining. Amber "low after this job" advisory when remaining drops to/under threshold post-deduction.
+  - `Dashboard.handleSubmit` short-circuits with the same insufficient message before calling the backend.
+- Backend: zero changes. AssemblyAI/Groq fallback pipeline, jobs route, history reads, compare/merge endpoints are all untouched.
+- RLS on `user_credits` is intentionally disabled (matches existing `transcripts` table). Hardening note: with the anon key in the browser any authenticated user could write to any row. For production, gate writes through Supabase RPC + RLS policies — added to the pending list below.
+- Frontend build (`npm.cmd run build`) passes with all credit patches applied.
+
+### Credits initialization hardening
+- `frontend/src/services/credits.js` was rewritten to use a true `supabase.upsert(payload, { onConflict: "user_id", ignoreDuplicates: true })` for row creation. This replaces the older select-then-insert pattern that race-condition-failed across tabs and silently left the user at 0 credits.
+- New exported helpers: `ensureUserCreditsRow(userId)` and `defaultCreditsRecord(userId)`. The ensure helper is called at the top of `fetchOrCreateUserCredits`, `deductCreditsForJob`, and `refundCreditsForJob`, so any code path that touches credits will create the row first if it is missing.
+- `fetchOrCreateUserCredits` no longer throws on DB failures (missing table, RLS misconfiguration, network blip). Falls back to `defaultCreditsRecord(userId)` so the UI never shows "0 remaining" merely because the row could not be created. Real `used_credits === total_credits` is unaffected — that genuinely shows 0.
+- `deductCreditsForJob` and `refundCreditsForJob` fail-open when the row is unreachable: they log to console and return `{ skipped: true, reason }` / `null` instead of blocking the user. Trade-off chosen so the app stays usable even before `supabase_credits_migration.sql` has been run.
+- Race-condition duplicate-key errors (Postgres code 23505) from the upsert are swallowed silently — they mean another concurrent insert won. Any other upsert error is logged.
