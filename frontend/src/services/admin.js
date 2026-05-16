@@ -34,7 +34,26 @@ async function adminFetch(path, options = {}) {
 }
 
 export async function checkAdmin(userId) {
-  if (!userId) return false;
+  if (!userId) {
+    console.info("[Admin.svc] checkAdmin: no userId");
+    return false;
+  }
+
+  // Preferred path: SECURITY DEFINER RPC. Bypasses RLS on admin_users so
+  // there's no recursion risk and no own-row policy required.
+  try {
+    const { data, error } = await supabase.rpc("is_admin", { uid: userId });
+    if (!error) {
+      console.info("[Admin.svc] is_admin RPC returned", { data });
+      return Boolean(data);
+    }
+    console.warn("[Admin.svc] is_admin RPC failed, falling back to direct select:", error.message);
+  } catch (err) {
+    console.warn("[Admin.svc] is_admin RPC threw, falling back:", err?.message || err);
+  }
+
+  // Fallback path for environments where the RPC has not been created yet.
+  // Requires the "users_read_own_admin_status" policy from supabase_admin_rls_fix.sql.
   try {
     const { data, error } = await supabase
       .from("admin_users")
@@ -42,12 +61,14 @@ export async function checkAdmin(userId) {
       .eq("user_id", userId)
       .limit(1);
     if (error) {
-      console.warn("[Admin] check failed (treating as non-admin):", error.message);
+      console.warn("[Admin.svc] direct admin_users select failed:", error.message);
       return false;
     }
-    return Array.isArray(data) && data.length > 0;
+    const isAdmin = Array.isArray(data) && data.length > 0;
+    console.info("[Admin.svc] direct select result", { rows: data?.length, isAdmin });
+    return isAdmin;
   } catch (err) {
-    console.warn("[Admin] check threw (treating as non-admin):", err?.message || err);
+    console.warn("[Admin.svc] direct select threw:", err?.message || err);
     return false;
   }
 }

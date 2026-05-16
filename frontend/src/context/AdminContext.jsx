@@ -9,10 +9,12 @@ export function AdminProvider({ userId, children }) {
   const [checked, setChecked] = useState(false);
 
   const refresh = useCallback(async () => {
+    console.info("[AdminCtx] refresh fired", { userId });
     if (!userId) {
       setIsAdmin(false);
       setChecked(true);
       setLoading(false);
+      console.info("[AdminCtx] no userId -> isAdmin=false, checked=true");
       return;
     }
     setLoading(true);
@@ -20,7 +22,9 @@ export function AdminProvider({ userId, children }) {
     try {
       const result = await checkAdmin(userId);
       setIsAdmin(Boolean(result));
-    } catch {
+      console.info("[AdminCtx] check complete", { userId, isAdmin: Boolean(result) });
+    } catch (err) {
+      console.error("[AdminCtx] check threw:", err?.message || err);
       setIsAdmin(false);
     } finally {
       setLoading(false);
