@@ -75,86 +75,105 @@ def verify_admin(jwt_token: str) -> str:
 
 
 def get_overview() -> dict:
-    transcripts = _client.table("transcripts").select("id, status, duration_seconds, credits_used, user_id, created_at, error_category").execute().data or []
-    credits = _client.table("user_credits").select("user_id, used_credits, total_credits, suspended, last_active_at, first_login_at, created_at").execute().data or []
-
-    now = datetime.now(timezone.utc)
-    today_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
-    week_start = now - timedelta(days=7)
-
-    completed = [t for t in transcripts if (t.get("status") or "completed") == "completed"]
-    failed = [t for t in transcripts if t.get("status") == "failed"]
-    total_minutes = sum((t.get("duration_seconds") or 0) for t in completed) / 60.0
-    total_credits_consumed = sum((t.get("used_credits") or 0) for t in credits) + sum((t.get("credits_used") or 0) for t in completed)
-
-    new_users_this_week = sum(
-        1 for c in credits
-        if c.get("first_login_at") and _safe_parse(c["first_login_at"]) and _safe_parse(c["first_login_at"]) >= week_start
-    )
-    active_today = sum(
-        1 for c in credits
-        if c.get("last_active_at") and _safe_parse(c["last_active_at"]) and _safe_parse(c["last_active_at"]) >= today_start
-    )
-
-    return {
-        "total_users": len(credits),
-        "active_users_today": active_today,
-        "new_users_this_week": new_users_this_week,
-        "total_transcripts": len(transcripts),
-        "completed_transcripts": len(completed),
-        "failed_jobs": len(failed),
-        "total_audio_minutes": round(total_minutes, 1),
-        "total_credits_consumed": int(total_credits_consumed),
-        "estimated_api_usage": round(total_minutes, 1),
+    empty = {
+        "total_users": 0,
+        "active_users_today": 0,
+        "new_users_this_week": 0,
+        "total_transcripts": 0,
+        "completed_transcripts": 0,
+        "failed_jobs": 0,
+        "total_audio_minutes": 0,
+        "total_credits_consumed": 0,
+        "estimated_api_usage": 0,
     }
+    try:
+        transcripts = _client.table("transcripts").select("id, status, duration_seconds, credits_used, user_id, created_at, error_category").execute().data or []
+        credits = _client.table("user_credits").select("user_id, used_credits, total_credits, suspended, last_active_at, first_login_at, created_at").execute().data or []
+
+        now = datetime.now(timezone.utc)
+        today_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+        week_start = now - timedelta(days=7)
+
+        completed = [t for t in transcripts if (t.get("status") or "completed") == "completed"]
+        failed = [t for t in transcripts if t.get("status") == "failed"]
+        total_minutes = sum((t.get("duration_seconds") or 0) for t in completed) / 60.0
+        total_credits_consumed = sum((c.get("used_credits") or 0) for c in credits) + sum((t.get("credits_used") or 0) for t in completed)
+
+        new_users_this_week = sum(
+            1 for c in credits
+            if c.get("first_login_at") and _safe_parse(c.get("first_login_at")) and _safe_parse(c.get("first_login_at")) >= week_start
+        )
+        active_today = sum(
+            1 for c in credits
+            if c.get("last_active_at") and _safe_parse(c.get("last_active_at")) and _safe_parse(c.get("last_active_at")) >= today_start
+        )
+
+        return {
+            "total_users": len(credits),
+            "active_users_today": active_today,
+            "new_users_this_week": new_users_this_week,
+            "total_transcripts": len(transcripts),
+            "completed_transcripts": len(completed),
+            "failed_jobs": len(failed),
+            "total_audio_minutes": round(total_minutes, 1),
+            "total_credits_consumed": int(total_credits_consumed),
+            "estimated_api_usage": round(total_minutes, 1),
+        }
+    except Exception as exc:
+        logger.exception("get_overview failed: %s", exc)
+        return empty
 
 
 def list_users(search: str = "", plan: str = "", status: str = "") -> list:
-    credits = _client.table("user_credits").select("*").execute().data or []
-    transcripts = _client.table("transcripts").select("user_id, status, duration_seconds, credits_used").execute().data or []
+    try:
+        credits = _client.table("user_credits").select("*").execute().data or []
+        transcripts = _client.table("transcripts").select("user_id, status, duration_seconds, credits_used").execute().data or []
 
-    transcripts_by_user = {}
-    for record in transcripts:
-        uid = record.get("user_id")
-        if not uid:
-            continue
-        bucket = transcripts_by_user.setdefault(uid, {"total": 0, "completed": 0, "failed": 0, "minutes": 0.0})
-        bucket["total"] += 1
-        if record.get("status") == "failed":
-            bucket["failed"] += 1
-        else:
-            bucket["completed"] += 1
-            bucket["minutes"] += (record.get("duration_seconds") or 0) / 60.0
+        transcripts_by_user = {}
+        for record in transcripts:
+            uid = record.get("user_id")
+            if not uid:
+                continue
+            bucket = transcripts_by_user.setdefault(uid, {"total": 0, "completed": 0, "failed": 0, "minutes": 0.0})
+            bucket["total"] += 1
+            if record.get("status") == "failed":
+                bucket["failed"] += 1
+            else:
+                bucket["completed"] += 1
+                bucket["minutes"] += (record.get("duration_seconds") or 0) / 60.0
 
-    rows = []
-    for row in credits:
-        uid = row.get("user_id")
-        stats = transcripts_by_user.get(uid, {"total": 0, "completed": 0, "failed": 0, "minutes": 0.0})
-        rows.append({
-            "user_id": uid,
-            "email": _safe_email(uid),
-            "plan": row.get("plan") or "free",
-            "total_credits": row.get("total_credits") or 0,
-            "used_credits": row.get("used_credits") or 0,
-            "remaining_credits": max(0, (row.get("total_credits") or 0) - (row.get("used_credits") or 0)),
-            "suspended": bool(row.get("suspended")),
-            "status": "suspended" if row.get("suspended") else "active",
-            "first_login_at": row.get("first_login_at") or row.get("created_at"),
-            "last_active_at": row.get("last_active_at"),
-            "transcripts_total": stats["total"],
-            "transcripts_completed": stats["completed"],
-            "transcripts_failed": stats["failed"],
-            "audio_minutes": round(stats["minutes"], 1),
-        })
+        rows = []
+        for row in credits:
+            uid = row.get("user_id")
+            stats = transcripts_by_user.get(uid, {"total": 0, "completed": 0, "failed": 0, "minutes": 0.0})
+            rows.append({
+                "user_id": uid,
+                "email": _safe_email(uid),
+                "plan": row.get("plan") or "free",
+                "total_credits": row.get("total_credits") or 0,
+                "used_credits": row.get("used_credits") or 0,
+                "remaining_credits": max(0, (row.get("total_credits") or 0) - (row.get("used_credits") or 0)),
+                "suspended": bool(row.get("suspended")),
+                "status": "suspended" if row.get("suspended") else "active",
+                "first_login_at": row.get("first_login_at") or row.get("created_at"),
+                "last_active_at": row.get("last_active_at"),
+                "transcripts_total": stats["total"],
+                "transcripts_completed": stats["completed"],
+                "transcripts_failed": stats["failed"],
+                "audio_minutes": round(stats["minutes"], 1),
+            })
 
-    if search:
-        needle = search.lower()
-        rows = [r for r in rows if needle in (r["email"] or "").lower() or needle in (r["user_id"] or "").lower()]
-    if plan:
-        rows = [r for r in rows if r["plan"] == plan]
-    if status:
-        rows = [r for r in rows if r["status"] == status]
-    return rows
+        if search:
+            needle = search.lower()
+            rows = [r for r in rows if needle in (r["email"] or "").lower() or needle in (r["user_id"] or "").lower()]
+        if plan:
+            rows = [r for r in rows if r["plan"] == plan]
+        if status:
+            rows = [r for r in rows if r["status"] == status]
+        return rows
+    except Exception as exc:
+        logger.exception("list_users failed: %s", exc)
+        return []
 
 
 def get_user_detail(user_id: str) -> dict:
@@ -212,12 +231,17 @@ def adjust_credits(user_id: str, mode: str, amount: int) -> dict:
     used = row.get("used_credits") or 0
 
     if mode == "add":
-        new_total = total + max(0, amount)
-        update = {"total_credits": new_total}
+        # "Add credits" means give the user more remaining credits without raising
+        # their plan cap. Implement by reducing used_credits, floored at 0.
+        new_used = max(0, used - max(0, int(amount)))
+        update = {"used_credits": new_used}
     elif mode == "reset":
         update = {"used_credits": 0, "last_reset_at": datetime.now(timezone.utc).isoformat()}
     elif mode == "set_total":
-        update = {"total_credits": max(0, amount)}
+        # Admin override of the plan cap. Clamp used so it doesn't exceed total.
+        new_total = max(0, int(amount))
+        new_used = min(used, new_total)
+        update = {"total_credits": new_total, "used_credits": new_used}
     else:
         raise ValueError("Unsupported credit adjustment mode.")
 
@@ -263,75 +287,101 @@ def update_setting(key: str, value) -> dict:
 
 
 def get_api_monitoring() -> dict:
-    transcripts = _client.table("transcripts").select("status, error_category, error_message, created_at, duration_seconds").execute().data or []
-    now = datetime.now(timezone.utc)
-    day_ago = now - timedelta(hours=24)
-    last_24h = [t for t in transcripts if t.get("created_at") and _safe_parse(t["created_at"]) and _safe_parse(t["created_at"]) >= day_ago]
-
-    failed = [t for t in last_24h if t.get("status") == "failed"]
-    rate_limit_hits = sum(1 for t in failed if "rate" in (t.get("error_message") or "").lower() or t.get("error_category") == "rate_limit")
-
-    return {
-        "groq": {
-            "requests_today": len(last_24h),
-            "failures_today": len(failed),
-            "rate_limit_hits": rate_limit_hits,
-            "status": _health(rate_limit_hits, len(failed)),
-        },
-        "assemblyai": {
-            "processed_minutes": round(sum((t.get("duration_seconds") or 0) for t in last_24h if t.get("status") == "completed") / 60.0, 1),
-            "requests_today": len(last_24h),
-            "failures_today": len(failed),
-            "status": _health(0, len(failed)),
-        },
+    empty = {
+        "groq": {"requests_today": 0, "failures_today": 0, "rate_limit_hits": 0, "status": "healthy"},
+        "assemblyai": {"processed_minutes": 0, "requests_today": 0, "failures_today": 0, "status": "healthy"},
     }
+    try:
+        transcripts = _client.table("transcripts").select("status, error_category, error_message, created_at, duration_seconds").execute().data or []
+        now = datetime.now(timezone.utc)
+        day_ago = now - timedelta(hours=24)
+
+        last_24h = []
+        for t in transcripts:
+            ts = _safe_parse(t.get("created_at"))
+            if ts and ts >= day_ago:
+                last_24h.append(t)
+
+        failed = [t for t in last_24h if t.get("status") == "failed"]
+        rate_limit_hits = sum(
+            1 for t in failed
+            if "rate" in (t.get("error_message") or "").lower() or t.get("error_category") == "rate_limit"
+        )
+
+        processed_minutes = round(
+            sum((t.get("duration_seconds") or 0) for t in last_24h if t.get("status") == "completed") / 60.0,
+            1,
+        )
+
+        return {
+            "groq": {
+                "requests_today": len(last_24h),
+                "failures_today": len(failed),
+                "rate_limit_hits": rate_limit_hits,
+                "status": _health(rate_limit_hits, len(failed)),
+            },
+            "assemblyai": {
+                "processed_minutes": processed_minutes,
+                "requests_today": len(last_24h),
+                "failures_today": len(failed),
+                "status": _health(0, len(failed)),
+            },
+        }
+    except Exception as exc:
+        logger.exception("get_api_monitoring failed: %s", exc)
+        return empty
 
 
 def get_analytics() -> dict:
-    transcripts = _client.table("transcripts").select("detected_language, audio_type, created_at, duration_seconds, status, credits_used").execute().data or []
-    credits = _client.table("user_credits").select("last_active_at, first_login_at").execute().data or []
+    empty = {"daily": [], "languages": [], "audio_types": []}
+    try:
+        transcripts = _client.table("transcripts").select("detected_language, audio_type, created_at, duration_seconds, status, credits_used").execute().data or []
+        credits = _client.table("user_credits").select("last_active_at, first_login_at, user_id").execute().data or []
 
-    now = datetime.now(timezone.utc)
-    days = []
-    for offset in range(13, -1, -1):
-        day = now - timedelta(days=offset)
-        day_start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
-        day_end = day_start + timedelta(days=1)
-        bucket = {
-            "date": day_start.date().isoformat(),
-            "uploads": 0,
-            "minutes": 0.0,
-            "credits_used": 0,
-            "active_users": 0,
-        }
+        now = datetime.now(timezone.utc)
+        days = []
+        for offset in range(13, -1, -1):
+            day = now - timedelta(days=offset)
+            day_start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
+            day_end = day_start + timedelta(days=1)
+            bucket = {
+                "date": day_start.date().isoformat(),
+                "uploads": 0,
+                "minutes": 0.0,
+                "credits_used": 0,
+                "active_users": 0,
+            }
+            user_set = set()
+            for t in transcripts:
+                ts = _safe_parse(t.get("created_at"))
+                if ts and day_start <= ts < day_end:
+                    bucket["uploads"] += 1
+                    bucket["minutes"] += (t.get("duration_seconds") or 0) / 60.0
+                    bucket["credits_used"] += t.get("credits_used") or 0
+            for c in credits:
+                ts = _safe_parse(c.get("last_active_at"))
+                if ts and day_start <= ts < day_end:
+                    user_set.add(c.get("user_id") or c.get("last_active_at"))
+            bucket["active_users"] = len(user_set)
+            bucket["minutes"] = round(bucket["minutes"], 1)
+            days.append(bucket)
+
+        languages = {}
+        audio_types = {}
         for t in transcripts:
-            ts = _safe_parse(t.get("created_at"))
-            if ts and day_start <= ts < day_end:
-                bucket["uploads"] += 1
-                bucket["minutes"] += (t.get("duration_seconds") or 0) / 60.0
-                bucket["credits_used"] += t.get("credits_used") or 0
-        user_set = set()
-        for c in credits:
-            ts = _safe_parse(c.get("last_active_at"))
-            if ts and day_start <= ts < day_end:
-                user_set.add(c.get("last_active_at"))
-        bucket["active_users"] = len(user_set)
-        bucket["minutes"] = round(bucket["minutes"], 1)
-        days.append(bucket)
+            lang = t.get("detected_language") or "unknown"
+            languages[lang] = languages.get(lang, 0) + 1
+            atype = t.get("audio_type") or "unknown"
+            audio_types[atype] = audio_types.get(atype, 0) + 1
 
-    languages = {}
-    audio_types = {}
-    for t in transcripts:
-        lang = t.get("detected_language") or "unknown"
-        languages[lang] = languages.get(lang, 0) + 1
-        atype = t.get("audio_type") or "unknown"
-        audio_types[atype] = audio_types.get(atype, 0) + 1
-
-    return {
-        "daily": days,
-        "languages": [{"label": k, "count": v} for k, v in sorted(languages.items(), key=lambda x: -x[1])[:8]],
-        "audio_types": [{"label": k, "count": v} for k, v in sorted(audio_types.items(), key=lambda x: -x[1])[:8]],
-    }
+        return {
+            "daily": days,
+            "languages": [{"label": k, "count": v} for k, v in sorted(languages.items(), key=lambda x: -x[1])[:8]],
+            "audio_types": [{"label": k, "count": v} for k, v in sorted(audio_types.items(), key=lambda x: -x[1])[:8]],
+        }
+    except Exception as exc:
+        logger.exception("get_analytics failed: %s", exc)
+        return empty
 
 
 def _safe_email(user_id: str) -> str:
