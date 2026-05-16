@@ -36,6 +36,7 @@ export default function Dashboard({ session }) {
 
   async function handleSubmit(file, durationSeconds) {
     const required = computeRequiredCredits(durationSeconds);
+    console.info("[Dashboard] handleSubmit", { durationSeconds, required, remaining, userId: session?.user?.id });
     if (required > remaining) {
       setError("Insufficient credits remaining.");
       return;
@@ -47,17 +48,20 @@ export default function Dashboard({ session }) {
 
     try {
       const job = await startJob({ file, userId: session.user.id, options });
+      console.info("[Dashboard] startJob returned", { job_id: job?.job_id, record_id: job?.record_id, status: job?.status });
       setCurrentJobId(job.job_id);
       if (required > 0 && job?.job_id) {
         try {
-          await deduct({ jobId: job.job_id, recordId: job.record_id, amount: required });
+          const deductResult = await deduct({ jobId: job.job_id, recordId: job.record_id, amount: required });
+          console.info("[Dashboard] post-deduct", { deductResult });
         } catch (err) {
           setError(friendlyError(err.message || "Credits could not be deducted."));
-          console.error("[Credits] Deduction failed:", err.message);
+          console.error("[Dashboard] Deduction failed:", err.message);
         }
       }
     } catch (err) {
       setError(friendlyError(err.message));
+      console.error("[Dashboard] handleSubmit error:", err.message);
     } finally {
       setLoading(false);
     }

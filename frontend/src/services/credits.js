@@ -68,7 +68,11 @@ export async function fetchOrCreateUserCredits(userId) {
 }
 
 export async function deductCreditsForJob({ userId, recordId, amount }) {
-  if (!userId || !amount || amount <= 0) return null;
+  console.info("[Credits.svc] deductCreditsForJob entry", { userId, recordId, amount });
+  if (!userId || !amount || amount <= 0) {
+    console.warn("[Credits.svc] early return: bad inputs");
+    return null;
+  }
 
   if (recordId) {
     const guard = await supabase
@@ -76,28 +80,35 @@ export async function deductCreditsForJob({ userId, recordId, amount }) {
       .select("credits_used")
       .eq("id", recordId)
       .maybeSingle();
+    console.info("[Credits.svc] guard read", { error: guard.error?.message, credits_used: guard.data?.credits_used });
     if (!guard.error && guard.data && (guard.data.credits_used || 0) > 0) {
       return { skipped: true, reason: "already_deducted" };
     }
     if (guard.error) {
       console.warn(
-        "[Credits] transcripts.credits_used guard unavailable, proceeding without DB idempotency stamp:",
+        "[Credits.svc] transcripts.credits_used guard unavailable, proceeding without DB idempotency stamp:",
         guard.error.message
       );
     }
   }
 
-  await ensureUserCreditsRow(userId);
+  const ensured = await ensureUserCreditsRow(userId);
+  console.info("[Credits.svc] ensureUserCreditsRow returned", ensured);
 
   const current = await supabase
     .from("user_credits")
     .select("used_credits, total_credits")
     .eq("user_id", userId)
     .maybeSingle();
+  console.info("[Credits.svc] current credits read", {
+    error: current.error?.message,
+    used: current.data?.used_credits,
+    total: current.data?.total_credits,
+  });
 
   if (current.error || !current.data) {
     console.error(
-      "[Credits] could not read user_credits row, skipping deduction:",
+      "[Credits.svc] could not read user_credits row, skipping deduction:",
       current.error?.message || "row missing after upsert"
     );
     return { skipped: true, reason: "row_unavailable" };
@@ -106,15 +117,25 @@ export async function deductCreditsForJob({ userId, recordId, amount }) {
   const usedNow = current.data.used_credits || 0;
   const totalNow = current.data.total_credits || 0;
   if (usedNow + amount > totalNow) {
+    console.warn("[Credits.svc] insufficient credits", { usedNow, totalNow, amount });
     throw new Error("Insufficient credits remaining.");
   }
 
+  const newUsed = usedNow + amount;
+  console.info("[Credits.svc] writing update", { user_id: userId, new_used: newUsed });
+
   const update = await supabase
     .from("user_credits")
-    .update({ used_credits: usedNow + amount, updated_at: new Date().toISOString() })
+    .update({ used_credits: newUsed, updated_at: new Date().toISOString() })
     .eq("user_id", userId)
     .select()
     .single();
+
+  console.info("[Credits.svc] update response", {
+    error: update.error?.message,
+    data: update.data ? { used: update.data.used_credits, total: update.data.total_credits } : null,
+  });
+
   if (update.error || !update.data) {
     throw new Error(`Failed to persist credit deduction: ${update.error?.message || "no row returned"}`);
   }
@@ -125,7 +146,9 @@ export async function deductCreditsForJob({ userId, recordId, amount }) {
       .update({ credits_used: amount })
       .eq("id", recordId);
     if (mark.error) {
-      console.warn("[Credits] Could not stamp credits_used (non-fatal):", mark.error.message);
+      console.warn("[Credits.svc] Could not stamp credits_used (non-fatal):", mark.error.message);
+    } else {
+      console.info("[Credits.svc] stamped transcripts.credits_used");
     }
   }
 
