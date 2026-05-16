@@ -13,40 +13,62 @@ logger = logging.getLogger(__name__)
 
 _SUPABASE_URL = os.getenv("SUPABASE_URL")
 _SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+_SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
 if not _SUPABASE_URL or not _SUPABASE_KEY:
     raise RuntimeError("SUPABASE_URL and SUPABASE_KEY must be set for admin_service.")
 
-_client: Client = create_client(_SUPABASE_URL, _SUPABASE_KEY)
+# Auth client uses the anon key — only used to validate the user's JWT via auth.get_user.
+_auth_client: Client = create_client(_SUPABASE_URL, _SUPABASE_KEY)
+
+# Data client should use the service-role key so admin reads/writes bypass RLS.
+# Fall back to the anon key with a warning if no service role is configured — admin queries
+# will then be subject to RLS and likely fail until SUPABASE_SERVICE_ROLE_KEY is set.
+if _SUPABASE_SERVICE_ROLE_KEY:
+    _client: Client = create_client(_SUPABASE_URL, _SUPABASE_SERVICE_ROLE_KEY)
+    logger.info("admin_service initialised with service-role key.")
+else:
+    _client = _auth_client
+    logger.warning(
+        "SUPABASE_SERVICE_ROLE_KEY is not set. admin_service is using the anon key — RLS policies will block admin lookups. "
+        "Set the service-role key in backend/.env and on Render."
+    )
 
 
 def verify_admin(jwt_token: str) -> str:
     if not jwt_token:
         raise PermissionError("Missing auth token.")
     try:
-        user_response = _client.auth.get_user(jwt_token)
+        user_response = _auth_client.auth.get_user(jwt_token)
     except Exception as exc:
-        logger.warning("Admin auth failed: %s", exc)
+        logger.warning("Admin auth: get_user failed: %s", exc)
         raise PermissionError("Invalid auth token.") from exc
+
     user = getattr(user_response, "user", None)
     user_id = getattr(user, "id", None) if user else None
     if not user_id:
+        logger.warning("Admin auth: token decoded but no user id present.")
         raise PermissionError("Invalid auth token (no user).")
 
-    row = (
+    logger.info("Admin auth: looking up user_id=%s in admin_users.", user_id)
+
+    response = (
         _client.table("admin_users")
         .select("user_id")
         .eq("user_id", user_id)
-        .maybeSingle()
+        .limit(1)
         .execute()
-        if hasattr(_client.table("admin_users").select("user_id"), "maybeSingle")
-        else _client.table("admin_users").select("user_id").eq("user_id", user_id).limit(1).execute()
     )
-    data = row.data
-    if isinstance(data, list):
-        is_admin = bool(data)
-    else:
-        is_admin = bool(data)
+    rows = response.data or []
+    is_admin = len(rows) > 0
+
+    logger.info(
+        "Admin auth: lookup complete. user_id=%s is_admin=%s rows=%d",
+        user_id,
+        is_admin,
+        len(rows),
+    )
+
     if not is_admin:
         raise PermissionError("Caller is not an admin.")
     return user_id
@@ -136,8 +158,9 @@ def list_users(search: str = "", plan: str = "", status: str = "") -> list:
 
 
 def get_user_detail(user_id: str) -> dict:
-    credits_resp = _client.table("user_credits").select("*").eq("user_id", user_id).maybeSingle().execute() if hasattr(_client.table("user_credits").select("*"), "maybeSingle") else _client.table("user_credits").select("*").eq("user_id", user_id).limit(1).execute()
-    credits_row = credits_resp.data if not isinstance(credits_resp.data, list) else (credits_resp.data[0] if credits_resp.data else None)
+    credits_resp = _client.table("user_credits").select("*").eq("user_id", user_id).limit(1).execute()
+    rows = credits_resp.data or []
+    credits_row = rows[0] if rows else None
     if not credits_row:
         raise ValueError("User not found.")
 

@@ -9,7 +9,8 @@
       "Bash(.\\\\backend\\\\venv\\\\Scripts\\\\python.exe -m compileall backend\\\\routes\\\\process.py)",
       "PowerShell(cd \"C:\\\\projects\\\\audio-transcriber-summariser\"; .\\\\backend\\\\venv\\\\Scripts\\\\python.exe -m compileall backend\\\\routes\\\\process.py; Write-Host \"Exit: $LASTEXITCODE\")",
       "Bash(.\\\\backend\\\\venv\\\\Scripts\\\\python.exe *)",
-      "PowerShell(& \"C:\\\\projects\\\\audio-transcriber-summariser\\\\backend\\\\venv\\\\Scripts\\\\python.exe\" -m compileall \"C:\\\\projects\\\\audio-transcriber-summariser\\\\backend\\\\services\\\\groq_service.py\")"
+      "PowerShell(& \"C:\\\\projects\\\\audio-transcriber-summariser\\\\backend\\\\venv\\\\Scripts\\\\python.exe\" -m compileall \"C:\\\\projects\\\\audio-transcriber-summariser\\\\backend\\\\services\\\\groq_service.py\")",
+      "PowerShell(& \"C:\\\\projects\\\\audio-transcriber-summariser\\\\backend\\\\venv\\\\Scripts\\\\python.exe\" -m compileall \"C:\\\\projects\\\\audio-transcriber-summariser\\\\backend\\\\services\\\\admin_service.py\")"
     ]
   }
 }
