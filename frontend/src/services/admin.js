@@ -33,13 +33,22 @@ async function adminFetch(path, options = {}) {
   return response.json();
 }
 
-export async function checkAdmin() {
+export async function checkAdmin(userId) {
+  if (!userId) return false;
   try {
-    const result = await adminFetch("/admin/check");
-    return Boolean(result?.is_admin);
+    const { data, error } = await supabase
+      .from("admin_users")
+      .select("user_id")
+      .eq("user_id", userId)
+      .limit(1);
+    if (error) {
+      console.warn("[Admin] check failed (treating as non-admin):", error.message);
+      return false;
+    }
+    return Array.isArray(data) && data.length > 0;
   } catch (err) {
-    if (err.code === "forbidden" || err.code === "unauthorized") return false;
-    throw err;
+    console.warn("[Admin] check threw (treating as non-admin):", err?.message || err);
+    return false;
   }
 }
 

@@ -12,11 +12,13 @@ export function AdminProvider({ userId, children }) {
     if (!userId) {
       setIsAdmin(false);
       setChecked(true);
+      setLoading(false);
       return;
     }
     setLoading(true);
+    setChecked(false);
     try {
-      const result = await checkAdmin();
+      const result = await checkAdmin(userId);
       setIsAdmin(Boolean(result));
     } catch {
       setIsAdmin(false);

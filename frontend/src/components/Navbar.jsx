@@ -50,6 +50,11 @@ export default function Navbar({ session }) {
 
         <div className="flex items-center gap-3">
           <CreditsBadge />
+          {isAdmin && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-purple-200 bg-purple-50 px-2 py-0.5 text-xs font-semibold text-purple-700">
+              Admin
+            </span>
+          )}
           {avatarUrl && (
             <img src={avatarUrl} alt="avatar" className="w-8 h-8 rounded-full" />
           )}
