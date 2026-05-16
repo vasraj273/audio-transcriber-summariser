@@ -50,7 +50,7 @@ export default function AdminAnalytics() {
         </ChartCard>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         <ChartCard title="Language distribution">
           {data.languages?.length ? (
             <HorizontalPercentBars data={data.languages} color="#6366f1" />
@@ -61,6 +61,13 @@ export default function AdminAnalytics() {
         <ChartCard title="Audio type distribution">
           {data.audio_types?.length ? (
             <HorizontalPercentBars data={data.audio_types} color="#0ea5e9" />
+          ) : (
+            <Empty />
+          )}
+        </ChartCard>
+        <ChartCard title="Provider mix">
+          {data.providers?.length ? (
+            <HorizontalPercentBars data={data.providers} color="#8b5cf6" />
           ) : (
             <Empty />
           )}

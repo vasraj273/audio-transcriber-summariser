@@ -49,6 +49,8 @@ async def process_audio(
 
 
 def process_audio_file(file_path: str, options: dict) -> dict:
+    import time
+    start_ts = time.perf_counter()
     transcription = _transcribe_with_fallback(file_path)
     quality = assess_transcription_quality(transcription)
 
@@ -66,6 +68,8 @@ def process_audio_file(file_path: str, options: dict) -> dict:
             "quality_flags": quality["quality_flags"],
             "warning": quality["warning"],
             "duration_seconds": transcription.get("duration", 0),
+            "transcription_provider": transcription.get("transcription_provider") or "unknown",
+            "processing_ms": int((time.perf_counter() - start_ts) * 1000),
         }
 
     try:
@@ -88,6 +92,10 @@ def process_audio_file(file_path: str, options: dict) -> dict:
     if summary_warning:
         combined_warning = (combined_warning + " " if combined_warning else "") + "Summary unavailable right now. Transcript was saved successfully."
 
+    processing_ms = int((time.perf_counter() - start_ts) * 1000)
+    provider = transcription.get("transcription_provider") or "unknown"
+    logger.info("[Analytics] transcription complete provider=%s duration=%.2fs processing_ms=%d", provider, transcription.get("duration", 0), processing_ms)
+
     return {
         "transcript": transcription["text"],
         "summary": summary_result["summary"],
@@ -101,13 +109,17 @@ def process_audio_file(file_path: str, options: dict) -> dict:
         "quality_flags": quality["quality_flags"],
         "warning": combined_warning,
         "duration_seconds": transcription.get("duration", 0),
+        "transcription_provider": provider,
+        "processing_ms": processing_ms,
     }
 
 
 def _transcribe_with_fallback(file_path: str) -> dict:
     logger.info("Transcription pipeline starting for %s.", os.path.basename(file_path))
     try:
-        return assemblyai_transcribe_audio(file_path)
+        result = assemblyai_transcribe_audio(file_path)
+        result["transcription_provider"] = "assemblyai"
+        return result
     except Exception as exc:
         logger.warning(
             "AssemblyAI transcription failed (%s). Falling back to Groq Whisper.",
@@ -115,6 +127,7 @@ def _transcribe_with_fallback(file_path: str) -> dict:
         )
         try:
             result = groq_transcribe_audio(file_path)
+            result["transcription_provider"] = "groq_whisper"
             logger.info("Groq Whisper fallback transcription succeeded.")
             return result
         except Exception as fallback_exc:

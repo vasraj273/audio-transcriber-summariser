@@ -41,7 +41,7 @@ def mark_transcript_processing(job_id: str) -> None:
 
 
 def complete_transcript(job_id: str, result: dict) -> None:
-    _update_by_job(job_id, {
+    payload = {
         "status": "completed",
         "transcript": result.get("transcript", ""),
         "summary": result.get("summary", ""),
@@ -55,7 +55,29 @@ def complete_transcript(job_id: str, result: dict) -> None:
         "duration_seconds": result.get("duration_seconds", 0),
         "transcript_segments": json.dumps(result.get("transcript_segments", [])),
         "error_message": result.get("warning", ""),
-    })
+        "transcription_provider": result.get("transcription_provider") or "unknown",
+        "processing_ms": result.get("processing_ms"),
+    }
+    try:
+        _update_by_job(job_id, payload)
+    except Exception:
+        # Fallback for environments where supabase_analytics_migration.sql has not been run yet.
+        payload.pop("transcription_provider", None)
+        payload.pop("processing_ms", None)
+        _update_by_job(job_id, payload)
+    print(f"[Analytics] record updated job_id={job_id} provider={payload.get('transcription_provider')}")
+
+
+def touch_user_active(user_id: str) -> None:
+    if not user_id:
+        return
+    try:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        _client.table("user_credits").update({"last_active_at": now}).eq("user_id", user_id).execute()
+        print(f"[Monitoring] request tracked user_id={user_id}")
+    except Exception as exc:
+        print(f"[Monitoring] touch_user_active failed: {exc}")
 
 
 def fail_transcript(job_id: str, error_message: str) -> None:

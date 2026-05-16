@@ -333,9 +333,12 @@ def get_api_monitoring() -> dict:
 
 
 def get_analytics() -> dict:
-    empty = {"daily": [], "languages": [], "audio_types": []}
+    empty = {"daily": [], "languages": [], "audio_types": [], "providers": []}
     try:
-        transcripts = _client.table("transcripts").select("detected_language, audio_type, created_at, duration_seconds, status, credits_used").execute().data or []
+        try:
+            transcripts = _client.table("transcripts").select("detected_language, audio_type, created_at, duration_seconds, status, credits_used, transcription_provider").execute().data or []
+        except Exception:
+            transcripts = _client.table("transcripts").select("detected_language, audio_type, created_at, duration_seconds, status, credits_used").execute().data or []
         credits = _client.table("user_credits").select("last_active_at, first_login_at, user_id").execute().data or []
 
         now = datetime.now(timezone.utc)
@@ -368,16 +371,27 @@ def get_analytics() -> dict:
 
         languages = {}
         audio_types = {}
+        providers = {}
         for t in transcripts:
             lang = t.get("detected_language") or "unknown"
             languages[lang] = languages.get(lang, 0) + 1
             atype = t.get("audio_type") or "unknown"
             audio_types[atype] = audio_types.get(atype, 0) + 1
+            prov = t.get("transcription_provider") or "unknown"
+            providers[prov] = providers.get(prov, 0) + 1
+
+        logger.info(
+            "[Analytics] aggregated: transcripts=%d languages=%d providers=%d",
+            len(transcripts),
+            len(languages),
+            len(providers),
+        )
 
         return {
             "daily": days,
             "languages": [{"label": k, "count": v} for k, v in sorted(languages.items(), key=lambda x: -x[1])[:8]],
             "audio_types": [{"label": k, "count": v} for k, v in sorted(audio_types.items(), key=lambda x: -x[1])[:8]],
+            "providers": [{"label": k, "count": v} for k, v in sorted(providers.items(), key=lambda x: -x[1])],
         }
     except Exception as exc:
         logger.exception("get_analytics failed: %s", exc)

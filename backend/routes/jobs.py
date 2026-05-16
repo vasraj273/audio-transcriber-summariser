@@ -10,6 +10,7 @@ from services.supabase_service import (
     fail_transcript,
     get_transcript_by_job,
     mark_transcript_processing,
+    touch_user_active,
 )
 
 router = APIRouter()
@@ -54,6 +55,11 @@ async def create_job(
     except Exception as exc:
         _safe_remove(tmp_path)
         raise HTTPException(status_code=500, detail=f"Could not create processing job: {exc}")
+
+    try:
+        touch_user_active(user_id)
+    except Exception:
+        pass
 
     JOBS[job_id] = {
         "job_id": job_id,
