@@ -291,6 +291,15 @@ def get_api_monitoring() -> dict:
         "groq": {"requests_today": 0, "failures_today": 0, "rate_limit_hits": 0, "status": "healthy"},
         "assemblyai": {"processed_minutes": 0, "requests_today": 0, "failures_today": 0, "status": "healthy"},
     }
+    try:
+        return _get_api_monitoring_inner(empty)
+    except Exception as exc:
+        print(f"[Monitoring] get_api_monitoring fatal: {exc}")
+        logger.exception("[Monitoring] get_api_monitoring fatal: %s", exc)
+        return empty
+
+
+def _get_api_monitoring_inner(empty: dict) -> dict:
     now = datetime.now(timezone.utc)
     day_ago = now - timedelta(hours=24)
 
@@ -366,7 +375,15 @@ def get_api_monitoring() -> dict:
 
 def get_analytics() -> dict:
     empty = {"daily": [], "languages": [], "audio_types": [], "providers": []}
+    try:
+        return _get_analytics_inner(empty)
+    except Exception as exc:
+        print(f"[Analytics] get_analytics fatal: {exc}")
+        logger.exception("[Analytics] get_analytics fatal: %s", exc)
+        return empty
 
+
+def _get_analytics_inner(empty: dict) -> dict:
     # Source-of-truth: analytics_events. Fallback to transcripts only when the
     # events table is empty (migration not run, or no jobs since deploy).
     events = []
