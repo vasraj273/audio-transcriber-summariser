@@ -1,7 +1,10 @@
 import logging
 import os
+import time
 from dotenv import load_dotenv
 import assemblyai as aai
+
+from services.analytics_service import record_api_call
 
 load_dotenv()
 
@@ -37,15 +40,34 @@ def transcribe_audio(file_path: str) -> dict:
     )
 
     logger.info("AssemblyAI transcription starting: %s", os.path.basename(file_path))
+    started = time.perf_counter()
 
     try:
         transcript = aai.Transcriber().transcribe(file_path, config=config)
     except Exception as exc:
         logger.exception("AssemblyAI SDK raised during transcribe().")
+        record_api_call(
+            provider="assemblyai",
+            endpoint="transcribe",
+            success=False,
+            rate_limited=_is_rate_limited(exc),
+            duration_seconds=0,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            error_message=str(exc),
+        )
         raise RuntimeError(f"AssemblyAI request failed: {exc}") from exc
 
     if transcript.status == aai.TranscriptStatus.error:
         logger.error("AssemblyAI returned error status: %s", transcript.error)
+        record_api_call(
+            provider="assemblyai",
+            endpoint="transcribe",
+            success=False,
+            rate_limited=_is_rate_limited(transcript.error or ""),
+            duration_seconds=0,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            error_message=str(transcript.error),
+        )
         raise RuntimeError(f"AssemblyAI transcription failed: {transcript.error}")
 
     json_response = getattr(transcript, "json_response", None) or {}
@@ -64,12 +86,26 @@ def transcribe_audio(file_path: str) -> dict:
         duration,
     )
 
+    record_api_call(
+        provider="assemblyai",
+        endpoint="transcribe",
+        success=True,
+        rate_limited=False,
+        duration_seconds=duration,
+        latency_ms=int((time.perf_counter() - started) * 1000),
+    )
+
     return {
         "text": (transcript.text or "").strip(),
         "language": language,
         "segments": segments,
         "duration": duration,
     }
+
+
+def _is_rate_limited(err) -> bool:
+    text = str(err).lower()
+    return "429" in text or "rate limit" in text or "rate_limit" in text or "quota" in text
 
 
 def _build_segments(transcript) -> list:

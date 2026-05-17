@@ -1,8 +1,11 @@
 import os
 import re
+import time
 from collections import Counter
 from groq import Groq
 from dotenv import load_dotenv
+
+from services.analytics_service import record_api_call
 
 load_dotenv()
 
@@ -18,31 +21,86 @@ def _is_rate_limit_error(exc: Exception) -> bool:
 
 
 def _llama_complete(messages: list, temperature: float = 0.3) -> str:
+    started = time.perf_counter()
     try:
         response = client.chat.completions.create(
             model=_PRIMARY_MODEL,
             messages=messages,
             temperature=temperature,
         )
+        record_api_call(
+            provider="groq_llama",
+            endpoint=_PRIMARY_MODEL,
+            success=True,
+            rate_limited=False,
+            duration_seconds=0,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+        )
+        return response.choices[0].message.content
     except Exception as exc:
-        if not _is_rate_limit_error(exc):
+        is_rl = _is_rate_limit_error(exc)
+        record_api_call(
+            provider="groq_llama",
+            endpoint=_PRIMARY_MODEL,
+            success=False,
+            rate_limited=is_rl,
+            duration_seconds=0,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            error_message=str(exc),
+        )
+        if not is_rl:
             raise
+
+    fallback_started = time.perf_counter()
+    try:
         response = client.chat.completions.create(
             model=_FALLBACK_MODEL,
             messages=messages,
             temperature=temperature,
         )
-    return response.choices[0].message.content
+        record_api_call(
+            provider="groq_llama",
+            endpoint=_FALLBACK_MODEL,
+            success=True,
+            rate_limited=False,
+            duration_seconds=0,
+            latency_ms=int((time.perf_counter() - fallback_started) * 1000),
+        )
+        return response.choices[0].message.content
+    except Exception as exc:
+        record_api_call(
+            provider="groq_llama",
+            endpoint=_FALLBACK_MODEL,
+            success=False,
+            rate_limited=_is_rate_limit_error(exc),
+            duration_seconds=0,
+            latency_ms=int((time.perf_counter() - fallback_started) * 1000),
+            error_message=str(exc),
+        )
+        raise
 
 
 def transcribe_audio(file_path: str) -> dict:
-    with open(file_path, "rb") as audio_file:
-        response = client.audio.transcriptions.create(
-            model="whisper-large-v3",
-            file=audio_file,
-            response_format="verbose_json",
-            timestamp_granularities=["segment"],
+    started = time.perf_counter()
+    try:
+        with open(file_path, "rb") as audio_file:
+            response = client.audio.transcriptions.create(
+                model="whisper-large-v3",
+                file=audio_file,
+                response_format="verbose_json",
+                timestamp_granularities=["segment"],
+            )
+    except Exception as exc:
+        record_api_call(
+            provider="groq_whisper",
+            endpoint="whisper-large-v3",
+            success=False,
+            rate_limited=_is_rate_limit_error(exc),
+            duration_seconds=0,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            error_message=str(exc),
         )
+        raise
     segments = []
     for segment in getattr(response, "segments", []) or []:
         if isinstance(segment, dict):
@@ -60,11 +118,20 @@ def transcribe_audio(file_path: str) -> dict:
             "text": str(text).strip(),
         })
 
+    duration = max((segment["end"] for segment in segments), default=0)
+    record_api_call(
+        provider="groq_whisper",
+        endpoint="whisper-large-v3",
+        success=True,
+        rate_limited=False,
+        duration_seconds=duration,
+        latency_ms=int((time.perf_counter() - started) * 1000),
+    )
     return {
         "text": response.text,
         "language": getattr(response, "language", "unknown"),
         "segments": [segment for segment in segments if segment["text"]],
-        "duration": max((segment["end"] for segment in segments), default=0),
+        "duration": duration,
     }
 
 

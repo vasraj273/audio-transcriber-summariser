@@ -291,28 +291,60 @@ def get_api_monitoring() -> dict:
         "groq": {"requests_today": 0, "failures_today": 0, "rate_limit_hits": 0, "status": "healthy"},
         "assemblyai": {"processed_minutes": 0, "requests_today": 0, "failures_today": 0, "status": "healthy"},
     }
+    now = datetime.now(timezone.utc)
+    day_ago = now - timedelta(hours=24)
+
     try:
-        transcripts = _client.table("transcripts").select("status, error_category, error_message, created_at, duration_seconds").execute().data or []
-        now = datetime.now(timezone.utc)
-        day_ago = now - timedelta(hours=24)
+        usage = _client.table("api_usage_events").select(
+            "provider, success, rate_limited, duration_seconds, created_at"
+        ).gte("created_at", day_ago.isoformat()).execute().data or []
+        logger.info("[Monitoring] api_usage_events 24h rows=%d", len(usage))
+    except Exception as exc:
+        logger.exception("[Monitoring] api_usage_events read failed: %s", exc)
+        usage = []
 
-        last_24h = []
-        for t in transcripts:
-            ts = _safe_parse(t.get("created_at"))
-            if ts and ts >= day_ago:
-                last_24h.append(t)
+    if usage:
+        def _aggregate(rows: list, providers: tuple) -> dict:
+            scoped = [r for r in rows if r.get("provider") in providers]
+            failures = [r for r in scoped if not r.get("success")]
+            rate_limit_hits = sum(1 for r in scoped if r.get("rate_limited"))
+            processed_minutes = round(
+                sum((r.get("duration_seconds") or 0) for r in scoped if r.get("success")) / 60.0,
+                1,
+            )
+            return {
+                "requests_today": len(scoped),
+                "failures_today": len(failures),
+                "rate_limit_hits": rate_limit_hits,
+                "processed_minutes": processed_minutes,
+                "status": _health(rate_limit_hits, len(failures)),
+            }
 
+        return {
+            "groq": _aggregate(usage, ("groq_llama", "groq_whisper")),
+            "assemblyai": _aggregate(usage, ("assemblyai",)),
+        }
+
+    # Fallback path used while api_usage_events is still empty (migration not run,
+    # or no requests since deploy). Approximate from transcripts.
+    try:
+        transcripts = _client.table("transcripts").select(
+            "status, error_category, error_message, created_at, duration_seconds, transcription_provider"
+        ).execute().data or []
+        last_24h = [t for t in transcripts if _safe_parse(t.get("created_at")) and _safe_parse(t.get("created_at")) >= day_ago]
         failed = [t for t in last_24h if t.get("status") == "failed"]
         rate_limit_hits = sum(
             1 for t in failed
             if "rate" in (t.get("error_message") or "").lower() or t.get("error_category") == "rate_limit"
         )
-
         processed_minutes = round(
             sum((t.get("duration_seconds") or 0) for t in last_24h if t.get("status") == "completed") / 60.0,
             1,
         )
-
+        logger.info(
+            "[Monitoring] fallback derived from transcripts 24h rows=%d failed=%d",
+            len(last_24h), len(failed),
+        )
         return {
             "groq": {
                 "requests_today": len(last_24h),
@@ -328,74 +360,104 @@ def get_api_monitoring() -> dict:
             },
         }
     except Exception as exc:
-        logger.exception("get_api_monitoring failed: %s", exc)
+        logger.exception("get_api_monitoring fallback failed: %s", exc)
         return empty
 
 
 def get_analytics() -> dict:
     empty = {"daily": [], "languages": [], "audio_types": [], "providers": []}
+
+    # Source-of-truth: analytics_events. Fallback to transcripts only when the
+    # events table is empty (migration not run, or no jobs since deploy).
+    events = []
     try:
-        try:
-            transcripts = _client.table("transcripts").select("detected_language, audio_type, created_at, duration_seconds, status, credits_used, transcription_provider").execute().data or []
-        except Exception:
-            transcripts = _client.table("transcripts").select("detected_language, audio_type, created_at, duration_seconds, status, credits_used").execute().data or []
-        credits = _client.table("user_credits").select("last_active_at, first_login_at, user_id").execute().data or []
-
-        now = datetime.now(timezone.utc)
-        days = []
-        for offset in range(13, -1, -1):
-            day = now - timedelta(days=offset)
-            day_start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
-            day_end = day_start + timedelta(days=1)
-            bucket = {
-                "date": day_start.date().isoformat(),
-                "uploads": 0,
-                "minutes": 0.0,
-                "credits_used": 0,
-                "active_users": 0,
-            }
-            user_set = set()
-            for t in transcripts:
-                ts = _safe_parse(t.get("created_at"))
-                if ts and day_start <= ts < day_end:
-                    bucket["uploads"] += 1
-                    bucket["minutes"] += (t.get("duration_seconds") or 0) / 60.0
-                    bucket["credits_used"] += t.get("credits_used") or 0
-            for c in credits:
-                ts = _safe_parse(c.get("last_active_at"))
-                if ts and day_start <= ts < day_end:
-                    user_set.add(c.get("user_id") or c.get("last_active_at"))
-            bucket["active_users"] = len(user_set)
-            bucket["minutes"] = round(bucket["minutes"], 1)
-            days.append(bucket)
-
-        languages = {}
-        audio_types = {}
-        providers = {}
-        for t in transcripts:
-            lang = t.get("detected_language") or "unknown"
-            languages[lang] = languages.get(lang, 0) + 1
-            atype = t.get("audio_type") or "unknown"
-            audio_types[atype] = audio_types.get(atype, 0) + 1
-            prov = t.get("transcription_provider") or "unknown"
-            providers[prov] = providers.get(prov, 0) + 1
-
-        logger.info(
-            "[Analytics] aggregated: transcripts=%d languages=%d providers=%d",
-            len(transcripts),
-            len(languages),
-            len(providers),
-        )
-
-        return {
-            "daily": days,
-            "languages": [{"label": k, "count": v} for k, v in sorted(languages.items(), key=lambda x: -x[1])[:8]],
-            "audio_types": [{"label": k, "count": v} for k, v in sorted(audio_types.items(), key=lambda x: -x[1])[:8]],
-            "providers": [{"label": k, "count": v} for k, v in sorted(providers.items(), key=lambda x: -x[1])],
-        }
+        events = _client.table("analytics_events").select(
+            "user_id, created_at, duration_seconds, language, audio_type, "
+            "provider_used, credits_used, transcript_status"
+        ).execute().data or []
+        logger.info("[Analytics] analytics_events rows=%d", len(events))
     except Exception as exc:
-        logger.exception("get_analytics failed: %s", exc)
-        return empty
+        logger.warning("[Analytics] analytics_events read failed (%s) - falling back to transcripts.", exc)
+
+    if not events:
+        try:
+            transcripts = _client.table("transcripts").select(
+                "detected_language, audio_type, created_at, duration_seconds, status, credits_used, transcription_provider, user_id"
+            ).execute().data or []
+            events = [
+                {
+                    "user_id": t.get("user_id"),
+                    "created_at": t.get("created_at"),
+                    "duration_seconds": t.get("duration_seconds") or 0,
+                    "language": t.get("detected_language") or "unknown",
+                    "audio_type": t.get("audio_type") or "unknown",
+                    "provider_used": t.get("transcription_provider") or "unknown",
+                    "credits_used": t.get("credits_used") or 0,
+                    "transcript_status": t.get("status") or "completed",
+                }
+                for t in transcripts
+            ]
+            logger.info("[Analytics] fallback transcripts rows=%d", len(transcripts))
+        except Exception as exc:
+            logger.exception("[Analytics] both analytics_events + transcripts reads failed: %s", exc)
+            return empty
+
+    try:
+        credits = _client.table("user_credits").select("last_active_at, first_login_at, user_id").execute().data or []
+    except Exception as exc:
+        logger.warning("[Analytics] user_credits read failed: %s", exc)
+        credits = []
+
+    now = datetime.now(timezone.utc)
+    days = []
+    for offset in range(13, -1, -1):
+        day = now - timedelta(days=offset)
+        day_start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
+        day_end = day_start + timedelta(days=1)
+        bucket = {
+            "date": day_start.date().isoformat(),
+            "uploads": 0,
+            "minutes": 0.0,
+            "credits_used": 0,
+            "active_users": 0,
+        }
+        user_set = set()
+        for e in events:
+            ts = _safe_parse(e.get("created_at"))
+            if ts and day_start <= ts < day_end:
+                bucket["uploads"] += 1
+                bucket["minutes"] += (e.get("duration_seconds") or 0) / 60.0
+                bucket["credits_used"] += e.get("credits_used") or 0
+        for c in credits:
+            ts = _safe_parse(c.get("last_active_at"))
+            if ts and day_start <= ts < day_end:
+                user_set.add(c.get("user_id") or c.get("last_active_at"))
+        bucket["active_users"] = len(user_set)
+        bucket["minutes"] = round(bucket["minutes"], 1)
+        days.append(bucket)
+
+    languages = {}
+    audio_types = {}
+    providers = {}
+    for e in events:
+        lang = e.get("language") or "unknown"
+        languages[lang] = languages.get(lang, 0) + 1
+        atype = e.get("audio_type") or "unknown"
+        audio_types[atype] = audio_types.get(atype, 0) + 1
+        prov = e.get("provider_used") or "unknown"
+        providers[prov] = providers.get(prov, 0) + 1
+
+    logger.info(
+        "[Analytics] aggregated: events=%d languages=%d providers=%d",
+        len(events), len(languages), len(providers),
+    )
+
+    return {
+        "daily": days,
+        "languages": [{"label": k, "count": v} for k, v in sorted(languages.items(), key=lambda x: -x[1])[:8]],
+        "audio_types": [{"label": k, "count": v} for k, v in sorted(audio_types.items(), key=lambda x: -x[1])[:8]],
+        "providers": [{"label": k, "count": v} for k, v in sorted(providers.items(), key=lambda x: -x[1])],
+    }
 
 
 def _safe_email(user_id: str) -> str:

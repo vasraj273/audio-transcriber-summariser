@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Header, HTTPException, Body
 from typing import Optional
 from services import admin_service
+from services import analytics_service
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -128,3 +129,21 @@ def api_monitoring(authorization: Optional[str] = Header(None)):
 def analytics(authorization: Optional[str] = Header(None)):
     _admin_id(authorization)
     return admin_service.get_analytics()
+
+
+@router.post("/analytics/backfill")
+def analytics_backfill(
+    payload: dict = Body(default={}),
+    authorization: Optional[str] = Header(None),
+):
+    """Copy every existing transcripts row into analytics_events.
+
+    POST body: {"force": true} to re-run even when analytics_events already
+    has rows (existing transcript_ids are skipped, so it's idempotent).
+    """
+    _admin_id(authorization)
+    force = bool((payload or {}).get("force"))
+    try:
+        return analytics_service.backfill_from_transcripts(force=force)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Backfill failed: {exc}")
