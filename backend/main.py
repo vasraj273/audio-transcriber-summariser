@@ -1,3 +1,5 @@
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routes.process import router as process_router
@@ -8,10 +10,19 @@ from routes.admin import router as admin_router
 
 app = FastAPI(title="Audio Transcriber and Summariser")
 
+_base_origins = [
+    "https://audio-transcriber-summariser.vercel.app",
+    "http://localhost:5173",
+    "http://localhost:3000",
+]
+_env_origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+_allowed_origins = list(dict.fromkeys(_base_origins + _env_origins))
+print(f"[CORS] allowed origins: {', '.join(_allowed_origins)}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=_allowed_origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
