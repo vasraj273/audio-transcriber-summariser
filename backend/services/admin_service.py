@@ -477,6 +477,56 @@ def _get_analytics_inner(empty: dict) -> dict:
     }
 
 
+def get_diagnostics() -> dict:
+    """Return env config and per-table health. Each item is individually try/excepted."""
+
+    def _table_count(name: str) -> dict:
+        try:
+            resp = _client.table(name).select("id", count="exact").limit(1).execute()
+            row_count = resp.count if resp.count is not None else len(resp.data or [])
+            return {"exists": True, "row_count": row_count, "error": None}
+        except Exception as exc:
+            return {"exists": False, "row_count": 0, "error": str(exc)}
+
+    def _latest_created_at(name: str) -> Optional[str]:
+        try:
+            resp = _client.table(name).select("created_at").order("created_at", desc=True).limit(1).execute()
+            rows = resp.data or []
+            return rows[0].get("created_at") if rows else None
+        except Exception:
+            return None
+
+    def _recent_rows(name: str, columns: list[str], limit: int = 5) -> list:
+        try:
+            resp = _client.table(name).select(", ".join(columns)).order("created_at", desc=True).limit(limit).execute()
+            return resp.data or []
+        except Exception as exc:
+            return [{"error": str(exc)}]
+
+    tables: dict = {}
+    for tname in ("transcripts", "analytics_events", "api_usage_events", "user_credits", "admin_users"):
+        info = _table_count(tname)
+        if info["exists"] and tname in ("transcripts", "analytics_events", "api_usage_events"):
+            info["latest_created_at"] = _latest_created_at(tname)
+        tables[tname] = info
+
+    return {
+        "env": {
+            "service_role_key_set": bool(_SUPABASE_SERVICE_ROLE_KEY),
+            "supabase_url": _SUPABASE_URL,
+        },
+        "tables": tables,
+        "recent_transcripts": _recent_rows(
+            "transcripts",
+            ["id", "created_at", "status", "duration_seconds", "transcription_provider", "credits_used", "user_id"],
+        ),
+        "recent_analytics_events": _recent_rows(
+            "analytics_events",
+            ["id", "created_at", "transcript_status", "provider_used", "duration_seconds", "user_id"],
+        ),
+    }
+
+
 def _safe_email(user_id: str) -> str:
     if not user_id:
         return ""

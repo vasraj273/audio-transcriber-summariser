@@ -147,3 +147,10 @@ def analytics_backfill(
         return analytics_service.backfill_from_transcripts(force=force)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Backfill failed: {exc}")
+
+
+@router.get("/diag")
+def diag(authorization: Optional[str] = Header(None)):
+    """Diagnostic endpoint — reports env config and table health without touching existing logic."""
+    _admin_id(authorization)
+    return admin_service.get_diagnostics()
