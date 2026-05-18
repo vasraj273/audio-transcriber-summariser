@@ -357,3 +357,77 @@ git diff --check
   - Toolbar is now visible whenever `records.length > 0` (not just when there are 2+ completed records or something selected).
   - New "Select all" / "Deselect all" toggle.
   - New red `Delete (N)` bulk button — appears whenever any rows are selected, visually separated from Compare/Merge by a thin vertical divider. Confirms via `ConfirmModal` then calls `deleteTranscripts(selectedIds)`, optimistically prunes local state, and clears the selection.
+
+### Analytics + API monitoring persistence
+- Root issue: Analytics + API Monitoring admin pages always showed zero data because everything was derived live from `transcripts` rows. Provider/duration columns were optional and silently missing, and no separate record existed for external API calls. Fix introduces a dedicated event-sourced persistence layer.
+- **NEW** migration `docs/supabase_analytics_events_migration.sql`. Creates two tables with RLS DISABLED (matches existing pattern) and indexes on `created_at` / `provider` / `user_id` / `transcript_id`:
+  ```sql
+  CREATE TABLE IF NOT EXISTS analytics_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    transcript_id UUID, job_id TEXT, user_id UUID,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    duration_seconds NUMERIC DEFAULT 0,
+    language TEXT, audio_type TEXT, provider_used TEXT,
+    credits_used INTEGER DEFAULT 0, processing_ms INTEGER,
+    transcript_status TEXT, error_message TEXT
+  );
+  CREATE TABLE IF NOT EXISTS api_usage_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    provider TEXT NOT NULL, endpoint TEXT,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    success BOOLEAN DEFAULT TRUE, rate_limited BOOLEAN DEFAULT FALSE,
+    duration_seconds NUMERIC DEFAULT 0, latency_ms INTEGER, error_message TEXT
+  );
+  ```
+- **NEW** `backend/services/analytics_service.py`. Uses `SUPABASE_SERVICE_ROLE_KEY` when set, falls back to anon key with a startup warning so RLS-protected tables still work in dev.
+  - `record_transcript_event(transcript_id, job_id, user_id, duration_seconds, language, audio_type, provider_used, credits_used, processing_ms, transcript_status, error_message)` — inserts into `analytics_events`. Raises on failure so the caller can decide; the call site in `routes/jobs.py` wraps it so analytics failure never masks a successful transcript.
+  - `record_api_call(provider, endpoint, success, rate_limited, duration_seconds, latency_ms, error_message)` — inserts into `api_usage_events`. **Never raises** but logs loudly. External AI call paths cannot fail because of monitoring instrumentation.
+  - `backfill_from_transcripts(force=False)` — copies every existing `transcripts` row into `analytics_events` in chunks of 200. Dedupes by `transcript_id` so re-running is safe. Use via `POST /admin/analytics/backfill {"force": true}`.
+  - Helper `_count_rows(table)` uses Supabase `count="exact"` for row-count reporting in logs and the diagnostic endpoint.
+  - Hard logs: `[Analytics] begin tracking ...`, `[Analytics] inserted id=... total_rows_now=N`, `[Analytics] insert failed: ...`, `[Monitoring] updated provider=... endpoint=...`.
+- **EDIT** `backend/routes/jobs.py`. Imports `record_transcript_event`; stores `user_id` on the in-memory JOBS dict at create time. Rewrote `_run_job` to call new helper `_emit_transcript_event` on **both** success and failure. The helper reads `credits_used` back from the `transcripts` row (so refunds aren't double-counted) and passes it through.
+- **EDIT** `backend/services/assemblyai_service.py`. Wraps `transcribe_audio` with `time.perf_counter()` timing + `record_api_call(provider="assemblyai", endpoint="transcribe", ...)` on success, SDK-raised failure, and error-status response paths. New helper `_is_rate_limited(err)` checks for `429` / `rate limit` / `quota` strings.
+- **EDIT** `backend/services/groq_service.py`. Rewrote `_llama_complete` so the primary model attempt and the 8B-instant fallback path each record their own `api_usage_events` row with separate endpoint labels. Wrapped `transcribe_audio` (Groq Whisper fallback) with the same timing + record pattern.
+- **EDIT** `backend/services/admin_service.py`.
+  - `get_analytics()` now reads from `analytics_events` first (14-day daily buckets, languages / audio_types / providers distributions). Falls back to scanning `transcripts` only when `analytics_events` is missing or empty.
+  - `get_api_monitoring()` now reads from `api_usage_events` first (24h window, aggregating by provider). The Groq Llama + Groq Whisper rows are grouped under a single "groq" provider in the response. Falls back to deriving from `transcripts` if `api_usage_events` is missing.
+  - Both functions were refactored into `_get_analytics_inner` / `_get_api_monitoring_inner` helpers with an outer try/except that prints + `logger.exception` and returns a safe empty dict. This restores the wrap the original code had — any internal failure (malformed `created_at`, edge case in `_safe_parse`, etc.) now returns `{}` instead of bubbling a 500 to FastAPI.
+  - New `get_diagnostics()` reports env config and table health: `env.service_role_key_set`, `env.supabase_url`; per-table `{exists, row_count, error, latest_created_at}` for `transcripts`, `analytics_events`, `api_usage_events`, `user_credits`, `admin_users`; `recent_transcripts` and `recent_analytics_events` (last 5 rows each). Each query is individually try/except wrapped using `count="exact"`.
+- **EDIT** `backend/routes/admin.py`. Added `from services import analytics_service`. New routes:
+  - `POST /admin/analytics/backfill` — accepts `{"force": true}` body, calls `analytics_service.backfill_from_transcripts(force=force)`, returns 500 on raised error so the operator sees the underlying DB problem rather than a silent no-op.
+  - `GET /admin/diag` — calls `admin_service.get_diagnostics()`. One-shot endpoint for diagnosing why the analytics/monitoring pages render empty (missing migration, missing env var, no rows, etc.).
+
+### Backend CORS hardening
+- Admin pages on the Vercel frontend were blocked with `No 'Access-Control-Allow-Origin' header`. Root cause: backend was using `allow_origins=["*"]` with `allow_credentials=False`, and the admin endpoints rely on `Authorization` headers + credentials.
+- **EDIT** `backend/main.py`. Replaced the wildcard CORS block with an explicit allowlist that merges in `ALLOWED_ORIGINS` env values:
+  ```python
+  _base_origins = [
+      "https://audio-transcriber-summariser.vercel.app",
+      "http://localhost:5173",
+      "http://localhost:3000",
+  ]
+  _env_origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+  _allowed_origins = list(dict.fromkeys(_base_origins + _env_origins))
+  print(f"[CORS] allowed origins: {', '.join(_allowed_origins)}")
+  app.add_middleware(
+      CORSMiddleware,
+      allow_origins=_allowed_origins,
+      allow_credentials=True,
+      allow_methods=["*"],
+      allow_headers=["*"],
+  )
+  ```
+- `allow_credentials=True` requires explicit origins (FastAPI/Starlette ignores wildcard once credentials are on). The `ALLOWED_ORIGINS` env var is now additive — extra origins (preview deploys, custom domains) can be appended without redeploying the backend code.
+- Startup log `[CORS] allowed origins: ...` is emitted once on boot so the Render log shows the live allowlist after every deploy.
+
+### Pending verification (analytics/monitoring)
+1. Run `docs/supabase_analytics_events_migration.sql` in Supabase SQL editor (creates `analytics_events` + `api_usage_events`).
+2. Set `SUPABASE_SERVICE_ROLE_KEY` on the Render dashboard for the backend service. Without it `analytics_service` falls back to the anon key and the warning `[Analytics] SUPABASE_SERVICE_ROLE_KEY not set; falling back to anon key — RLS may block inserts` will appear in logs.
+3. Redeploy backend on Render after both the migration and env var are in place.
+4. Hit `GET /admin/diag` with the admin JWT to confirm:
+   - `env.service_role_key_set` is `true`
+   - `tables.analytics_events.exists` is `true`
+   - `tables.api_usage_events.exists` is `true`
+   - `tables.transcripts.row_count` matches expectation
+5. Upload one new audio job; `recent_analytics_events` in `/admin/diag` should grow by one and the API Monitoring page should show at least one Groq + one AssemblyAI row in the 24h window.
+6. If `analytics_events` is empty but `transcripts.row_count > 0`, call `POST /admin/analytics/backfill {"force": true}` once to populate historical analytics from existing transcripts.

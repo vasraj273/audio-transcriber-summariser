@@ -22,6 +22,31 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+# Module-level flags so table-missing / RLS warnings are emitted once per process, not on every call.
+_table_missing_warned: set[str] = set()
+_rls_warned: set[str] = set()
+
+
+def _classify_insert_error(exc: Exception, table: str) -> None:
+    """Log a single loud message per process when an insert fails for a known reason."""
+    msg = str(exc).lower()
+    if "42p01" in msg or "does not exist" in msg or "relation" in msg:
+        if table not in _table_missing_warned:
+            _table_missing_warned.add(table)
+            logger.error(
+                "[Analytics] TABLE MISSING: '%s' does not exist in Supabase. "
+                "Run docs/supabase_analytics_events_migration.sql in the Supabase SQL editor.",
+                table,
+            )
+    elif "42501" in msg or "insufficient_privilege" in msg or "permission denied" in msg:
+        if table not in _rls_warned:
+            _rls_warned.add(table)
+            logger.error(
+                "[Analytics] INSERT DENIED on '%s': RLS is blocking the write. "
+                "SUPABASE_SERVICE_ROLE_KEY is likely missing or incorrect on Render.",
+                table,
+            )
+
 _SUPABASE_URL = os.getenv("SUPABASE_URL")
 _SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 _SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
@@ -88,6 +113,7 @@ def record_transcript_event(
     try:
         response = _client.table("analytics_events").insert(payload).execute()
     except Exception as exc:
+        _classify_insert_error(exc, "analytics_events")
         print(f"[Analytics] insert failed payload={payload} error={exc}")
         logger.exception("[Analytics] analytics_events insert failed.")
         raise
@@ -133,6 +159,7 @@ def record_api_call(
     try:
         _client.table("api_usage_events").insert(payload).execute()
     except Exception as exc:
+        _classify_insert_error(exc, "api_usage_events")
         print(
             f"[Monitoring] insert failed provider={provider} endpoint={endpoint} "
             f"success={success} rate_limited={rate_limited} error={exc}"
@@ -226,6 +253,7 @@ def backfill_from_transcripts(force: bool = False) -> dict:
             response = _client.table("analytics_events").insert(chunk).execute()
             inserted_total += len(response.data or [])
         except Exception as exc:
+            _classify_insert_error(exc, "analytics_events")
             print(f"[Analytics] backfill chunk insert failed (size={len(chunk)}): {exc}")
             logger.exception("[Analytics] backfill chunk insert failed.")
             raise

@@ -288,6 +288,7 @@ def update_setting(key: str, value) -> dict:
 
 def get_api_monitoring() -> dict:
     empty = {
+        "source": "empty",
         "groq": {"requests_today": 0, "failures_today": 0, "rate_limit_hits": 0, "status": "healthy"},
         "assemblyai": {"processed_minutes": 0, "requests_today": 0, "failures_today": 0, "status": "healthy"},
     }
@@ -303,14 +304,14 @@ def _get_api_monitoring_inner(empty: dict) -> dict:
     now = datetime.now(timezone.utc)
     day_ago = now - timedelta(hours=24)
 
+    usage = []
     try:
         usage = _client.table("api_usage_events").select(
             "provider, success, rate_limited, duration_seconds, created_at"
         ).gte("created_at", day_ago.isoformat()).execute().data or []
         logger.info("[Monitoring] api_usage_events 24h rows=%d", len(usage))
     except Exception as exc:
-        logger.exception("[Monitoring] api_usage_events read failed: %s", exc)
-        usage = []
+        logger.warning("[Monitoring] api_usage_events read failed (%s) — falling back to transcripts.", exc)
 
     if usage:
         def _aggregate(rows: list, providers: tuple) -> dict:
@@ -330,42 +331,59 @@ def _get_api_monitoring_inner(empty: dict) -> dict:
             }
 
         return {
+            "source": "api_usage_events",
             "groq": _aggregate(usage, ("groq_llama", "groq_whisper")),
             "assemblyai": _aggregate(usage, ("assemblyai",)),
         }
 
-    # Fallback path used while api_usage_events is still empty (migration not run,
-    # or no requests since deploy). Approximate from transcripts.
+    # Fallback: api_usage_events is empty or missing. Derive from transcripts table.
+    # Count every row regardless of whether optional columns exist.
     try:
         transcripts = _client.table("transcripts").select(
-            "status, error_category, error_message, created_at, duration_seconds, transcription_provider"
+            "id, status, error_category, error_message, created_at, duration_seconds"
         ).execute().data or []
-        last_24h = [t for t in transcripts if _safe_parse(t.get("created_at")) and _safe_parse(t.get("created_at")) >= day_ago]
-        failed = [t for t in last_24h if t.get("status") == "failed"]
+        last_24h = [
+            t for t in transcripts
+            if _safe_parse(t.get("created_at")) and _safe_parse(t.get("created_at")) >= day_ago
+        ]
+        # A row is "completed" when status is explicitly "completed" OR status is absent
+        # (older rows saved without a status column default to completed).
+        completed_24h = [
+            t for t in last_24h
+            if (t.get("status") or "completed") not in ("failed", "processing")
+        ]
+        failed_24h = [t for t in last_24h if t.get("status") == "failed"]
         rate_limit_hits = sum(
-            1 for t in failed
-            if "rate" in (t.get("error_message") or "").lower() or t.get("error_category") == "rate_limit"
+            1 for t in failed_24h
+            if "rate" in (t.get("error_message") or "").lower()
+            or t.get("error_category") == "rate_limit"
         )
         processed_minutes = round(
-            sum((t.get("duration_seconds") or 0) for t in last_24h if t.get("status") == "completed") / 60.0,
+            sum((t.get("duration_seconds") or 0) for t in completed_24h) / 60.0,
             1,
         )
+        # Each completed transcript = 1 Groq Whisper + 1 Groq Llama call.
+        # Count failures as calls that threw (those rows have status=failed).
+        groq_requests = len(last_24h)
+        groq_failures = len(failed_24h)
+
         logger.info(
-            "[Monitoring] fallback derived from transcripts 24h rows=%d failed=%d",
-            len(last_24h), len(failed),
+            "[Monitoring] fallback derived from transcripts 24h rows=%d completed=%d failed=%d minutes=%.1f",
+            len(last_24h), len(completed_24h), groq_failures, processed_minutes,
         )
         return {
+            "source": "transcripts_fallback",
             "groq": {
-                "requests_today": len(last_24h),
-                "failures_today": len(failed),
+                "requests_today": groq_requests,
+                "failures_today": groq_failures,
                 "rate_limit_hits": rate_limit_hits,
-                "status": _health(rate_limit_hits, len(failed)),
+                "status": _health(rate_limit_hits, groq_failures),
             },
             "assemblyai": {
                 "processed_minutes": processed_minutes,
-                "requests_today": len(last_24h),
-                "failures_today": len(failed),
-                "status": _health(0, len(failed)),
+                "requests_today": groq_requests,
+                "failures_today": groq_failures,
+                "status": _health(0, groq_failures),
             },
         }
     except Exception as exc:
@@ -374,7 +392,7 @@ def _get_api_monitoring_inner(empty: dict) -> dict:
 
 
 def get_analytics() -> dict:
-    empty = {"daily": [], "languages": [], "audio_types": [], "providers": []}
+    empty = {"source": "empty", "daily": [], "languages": [], "audio_types": [], "providers": []}
     try:
         return _get_analytics_inner(empty)
     except Exception as exc:
@@ -384,9 +402,12 @@ def get_analytics() -> dict:
 
 
 def _get_analytics_inner(empty: dict) -> dict:
-    # Source-of-truth: analytics_events. Fallback to transcripts only when the
-    # events table is empty (migration not run, or no jobs since deploy).
+    from services import analytics_service  # local import to avoid circular at module level
+
+    # Source-of-truth: analytics_events. Fallback to transcripts when the events
+    # table is empty (migration not run, or no jobs since deploy).
     events = []
+    source = "analytics_events"
     try:
         events = _client.table("analytics_events").select(
             "user_id, created_at, duration_seconds, language, audio_type, "
@@ -394,30 +415,61 @@ def _get_analytics_inner(empty: dict) -> dict:
         ).execute().data or []
         logger.info("[Analytics] analytics_events rows=%d", len(events))
     except Exception as exc:
-        logger.warning("[Analytics] analytics_events read failed (%s) - falling back to transcripts.", exc)
+        logger.warning("[Analytics] analytics_events read failed (%s) — falling back to transcripts.", exc)
+        source = "transcripts_fallback"
 
     if not events:
+        # Try to auto-backfill from transcripts before serving the fallback view.
         try:
-            transcripts = _client.table("transcripts").select(
-                "detected_language, audio_type, created_at, duration_seconds, status, credits_used, transcription_provider, user_id"
+            transcripts_raw = _client.table("transcripts").select(
+                "id, user_id, detected_language, audio_type, created_at, "
+                "duration_seconds, status, credits_used, transcription_provider"
             ).execute().data or []
-            events = [
-                {
-                    "user_id": t.get("user_id"),
-                    "created_at": t.get("created_at"),
-                    "duration_seconds": t.get("duration_seconds") or 0,
-                    "language": t.get("detected_language") or "unknown",
-                    "audio_type": t.get("audio_type") or "unknown",
-                    "provider_used": t.get("transcription_provider") or "unknown",
-                    "credits_used": t.get("credits_used") or 0,
-                    "transcript_status": t.get("status") or "completed",
-                }
-                for t in transcripts
-            ]
-            logger.info("[Analytics] fallback transcripts rows=%d", len(transcripts))
+            logger.info("[Analytics] transcripts rows=%d for fallback/backfill.", len(transcripts_raw))
         except Exception as exc:
-            logger.exception("[Analytics] both analytics_events + transcripts reads failed: %s", exc)
-            return empty
+            logger.exception("[Analytics] transcripts read failed: %s", exc)
+            transcripts_raw = []
+
+        if transcripts_raw:
+            # Attempt auto-backfill (non-blocking — if it fails we still serve fallback).
+            if source == "analytics_events":
+                # analytics_events table exists but is empty; transcripts have data → backfill.
+                try:
+                    result = analytics_service.backfill_from_transcripts(force=False)
+                    logger.info("[Analytics] auto-backfill triggered on first admin read: %s", result)
+                    # Re-read analytics_events after backfill so this request benefits immediately.
+                    events = _client.table("analytics_events").select(
+                        "user_id, created_at, duration_seconds, language, audio_type, "
+                        "provider_used, credits_used, transcript_status"
+                    ).execute().data or []
+                    logger.info("[Analytics] post-backfill analytics_events rows=%d", len(events))
+                except Exception as exc:
+                    logger.warning("[Analytics] auto-backfill failed (%s) — serving transcripts fallback.", exc)
+
+            if not events:
+                # Serve the transcripts-derived view directly.
+                source = "transcripts_fallback"
+                events = [
+                    {
+                        "user_id": t.get("user_id"),
+                        "created_at": t.get("created_at"),
+                        "duration_seconds": t.get("duration_seconds") or 0,
+                        "language": t.get("detected_language") or "unknown",
+                        "audio_type": t.get("audio_type") or "unknown",
+                        "provider_used": t.get("transcription_provider") or "unknown",
+                        "credits_used": t.get("credits_used") or 0,
+                        "transcript_status": t.get("status") or "completed",
+                    }
+                    for t in transcripts_raw
+                ]
+                logger.info("[Analytics] serving transcripts_fallback events=%d", len(events))
+        else:
+            # No transcripts at all — return empty with correct source label.
+            if not events:
+                return {**empty, "source": source}
+
+    if not events:
+        return {**empty, "source": source}
 
     try:
         credits = _client.table("user_credits").select("last_active_at, first_login_at, user_id").execute().data or []
@@ -444,7 +496,7 @@ def _get_analytics_inner(empty: dict) -> dict:
             if ts and day_start <= ts < day_end:
                 bucket["uploads"] += 1
                 bucket["minutes"] += (e.get("duration_seconds") or 0) / 60.0
-                bucket["credits_used"] += e.get("credits_used") or 0
+                bucket["credits_used"] += (e.get("credits_used") or 0)
         for c in credits:
             ts = _safe_parse(c.get("last_active_at"))
             if ts and day_start <= ts < day_end:
@@ -453,9 +505,9 @@ def _get_analytics_inner(empty: dict) -> dict:
         bucket["minutes"] = round(bucket["minutes"], 1)
         days.append(bucket)
 
-    languages = {}
-    audio_types = {}
-    providers = {}
+    languages: dict = {}
+    audio_types: dict = {}
+    providers: dict = {}
     for e in events:
         lang = e.get("language") or "unknown"
         languages[lang] = languages.get(lang, 0) + 1
@@ -465,11 +517,12 @@ def _get_analytics_inner(empty: dict) -> dict:
         providers[prov] = providers.get(prov, 0) + 1
 
     logger.info(
-        "[Analytics] aggregated: events=%d languages=%d providers=%d",
-        len(events), len(languages), len(providers),
+        "[Analytics] aggregated: source=%s events=%d languages=%d providers=%d",
+        source, len(events), len(languages), len(providers),
     )
 
     return {
+        "source": source,
         "daily": days,
         "languages": [{"label": k, "count": v} for k, v in sorted(languages.items(), key=lambda x: -x[1])[:8]],
         "audio_types": [{"label": k, "count": v} for k, v in sorted(audio_types.items(), key=lambda x: -x[1])[:8]],
