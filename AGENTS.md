@@ -431,3 +431,27 @@ git diff --check
    - `tables.transcripts.row_count` matches expectation
 5. Upload one new audio job; `recent_analytics_events` in `/admin/diag` should grow by one and the API Monitoring page should show at least one Groq + one AssemblyAI row in the 24h window.
 6. If `analytics_events` is empty but `transcripts.row_count > 0`, call `POST /admin/analytics/backfill {"force": true}` once to populate historical analytics from existing transcripts.
+
+### Analytics + monitoring zero-data robustness pass
+- Symptom after the persistence layer shipped: Analytics page rendered "No data yet" and API Monitoring showed all zeros + subtitle "Last 24 hours, derived from transcript status" + footer "Note: stats are inferred from `transcripts` rows." That subtitle/footer is the **fallback wording** in `_get_api_monitoring_inner` — so the primary read from `api_usage_events` was failing (table missing / RLS blocking / not yet migrated) and the secondary fallback from `transcripts` was also returning zero because the queries were column-fragile.
+- Three root causes all needed to be tolerated simultaneously: (1) `docs/supabase_analytics_events_migration.sql` not yet run → tables don't exist, (2) `SUPABASE_SERVICE_ROLE_KEY` not set on Render → anon-key insert blocked by default permissions, (3) `transcripts` rows missing optional columns like `transcription_provider` that the fallback assumed were present.
+- **EDIT** `backend/services/admin_service.py`.
+  - `_get_api_monitoring_inner` fallback rewritten to read only columns that always exist on `transcripts`: `id, status, error_category, error_message, created_at, duration_seconds`. Null/missing `status` is treated as "completed" so historical rows (pre-status-column) still count. Groq request count = successful summary rows; AssemblyAI request count = rows with non-null transcript text; failures bucketed via `status == "failed"`; processed minutes = `sum(duration_seconds)/60`. The fallback no longer references `transcription_provider` at all, so the response populates whether or not the credits migration column-set is present.
+  - `_get_analytics_inner` now **auto-backfills on read**: when `analytics_events.row_count == 0` AND `transcripts.row_count > 0`, calls `analytics_service.backfill_from_transcripts(force=False)` inline and re-queries `analytics_events`. First admin page load after the user runs the migration auto-populates the charts; no need for them to remember to `POST /admin/analytics/backfill` manually.
+  - Both endpoints now return a `source` field in the response: `"analytics_events"` / `"api_usage_events"` / `"transcripts_fallback"` / `"empty"`. Lets curl-based diagnosis say definitively which path served the response without parsing wording.
+  - Outer try/except wrap on both `_get_*_inner` helpers preserved so any internal failure still returns a safe empty dict instead of a 500.
+- **EDIT** `backend/services/analytics_service.py`.
+  - New module-level `_classify_insert_error(exc)` inspects PostgREST error codes/messages and emits one loud log per process for known-bad states:
+    - `42P01` (relation does not exist) → `[Analytics] table missing — run docs/supabase_analytics_events_migration.sql in Supabase SQL editor`
+    - `42501` (insufficient_privilege) → `[Analytics] insert denied — SUPABASE_SERVICE_ROLE_KEY likely missing or RLS blocks anon role`
+  - Wired into all three insert sites: `record_transcript_event`, `record_api_call`, and the per-chunk insert inside `backfill_from_transcripts`. Module-level guard so the same diagnostic doesn't spam every call — it logs once then quietly continues to fail-soft like before.
+- Frontend untouched. Job pipeline, transcription services, jobs route, credits, history, CORS config untouched.
+
+### Pending verification (analytics zero-data fix)
+1. Run `docs/supabase_analytics_events_migration.sql` in Supabase SQL editor. Creates `analytics_events` + `api_usage_events` tables with RLS DISABLED.
+2. Set `SUPABASE_SERVICE_ROLE_KEY` on the Render dashboard for the backend service. Pull the value from Supabase → Settings → API → `service_role` JWT. Without it the new diagnostic log `[Analytics] insert denied — SUPABASE_SERVICE_ROLE_KEY likely missing or RLS blocks anon role` will appear on the first transcription after deploy.
+3. Push backend → Render redeploys.
+4. Hit `/admin/analytics` once (just opening the admin page is enough). Backend will auto-backfill historical transcripts into `analytics_events` on that first read. Charts should populate immediately.
+5. Run a fresh transcription. Confirm Render logs print `[Analytics] inserted id=... total_rows_now=N` and `[Monitoring] updated provider=...`.
+6. To diagnose later, curl: `curl -H "Authorization: Bearer <JWT>" https://audio-transcriber-summariser.onrender.com/admin/analytics | python -m json.tool`. The `source` field tells you the served path: `analytics_events` (healthy), `transcripts_fallback` (migration not yet run, but UI still shows real numbers), `empty` (no transcripts at all).
+7. Same curl with `/admin/api-monitoring` for the API monitoring tab. Want `source == "api_usage_events"` post-migration.
