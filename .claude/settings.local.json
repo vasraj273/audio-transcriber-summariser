@@ -11,7 +11,15 @@
       "Bash(.\\\\backend\\\\venv\\\\Scripts\\\\python.exe *)",
       "PowerShell(& \"C:\\\\projects\\\\audio-transcriber-summariser\\\\backend\\\\venv\\\\Scripts\\\\python.exe\" -m compileall \"C:\\\\projects\\\\audio-transcriber-summariser\\\\backend\\\\services\\\\groq_service.py\")",
       "PowerShell(& \"C:\\\\projects\\\\audio-transcriber-summariser\\\\backend\\\\venv\\\\Scripts\\\\python.exe\" -m compileall \"C:\\\\projects\\\\audio-transcriber-summariser\\\\backend\\\\services\\\\admin_service.py\")",
-      "PowerShell(& \"C:\\\\projects\\\\audio-transcriber-summariser\\\\backend\\\\venv\\\\Scripts\\\\python.exe\" -m compileall \"C:\\\\projects\\\\audio-transcriber-summariser\\\\backend\\\\routes\" \"C:\\\\projects\\\\audio-transcriber-summariser\\\\backend\\\\services\" 2>&1)"
+      "PowerShell(& \"C:\\\\projects\\\\audio-transcriber-summariser\\\\backend\\\\venv\\\\Scripts\\\\python.exe\" -m compileall \"C:\\\\projects\\\\audio-transcriber-summariser\\\\backend\\\\routes\" \"C:\\\\projects\\\\audio-transcriber-summariser\\\\backend\\\\services\" 2>&1)",
+      "PowerShell(npx hyperframes --version)",
+      "Bash(npx hyperframes *)",
+      "Bash(\"c:/Projects/audio-transcriber-summariser/backend/venv/Scripts/python.exe\" -m compileall \"c:/Projects/audio-transcriber-summariser/backend/main.py\" \"c:/Projects/audio-transcriber-summariser/backend/routes\" \"c:/Projects/audio-transcriber-summariser/backend/services\")",
+      "Bash(\"c:/Projects/audio-transcriber-summariser/backend/venv/Scripts/python.exe\" -m compileall -f \"c:/Projects/audio-transcriber-summariser/backend\")",
+      "Bash(\"c:/Projects/audio-transcriber-summariser/backend/venv/Scripts/python.exe\" -m compileall -f \"c:/Projects/audio-transcriber-summariser/backend/main.py\" \"c:/Projects/audio-transcriber-summariser/backend/routes\" \"c:/Projects/audio-transcriber-summariser/backend/services\")",
+      "Bash(\"./venv/Scripts/python.exe\" -c \"from routes import telegram; print\\('telegram router loaded OK, prefix:', telegram.router.prefix\\); print\\('routes:', [r.path for r in telegram.router.routes]\\)\")",
+      "Bash(\"./venv/Scripts/python.exe\" -c \"import main; print\\('main OK; routes total:', len\\(main.app.routes\\)\\)\")",
+      "Bash(python -m compileall backend/main.py backend/routes backend/services)"
     ]
   }
 }

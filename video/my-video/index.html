@@ -1,0 +1,836 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        width: 1920px; height: 1080px; overflow: hidden;
+        background: #0e1014;
+        font-family: "Bricolage Grotesque", system-ui, sans-serif;
+        color: #f4ede0;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* ---------- SCENE CONTAINERS ---------- */
+      .scene {
+        position: absolute; inset: 0;
+        width: 1920px; height: 1080px;
+        overflow: hidden;
+        background: #0e1014;
+      }
+      .scene-inner {
+        position: absolute; inset: 0;
+        width: 100%; height: 100%;
+        display: flex; flex-direction: column;
+        padding: 90px 140px;
+        box-sizing: border-box;
+      }
+      #scene1 { z-index: 1; }
+      #scene2, #scene3, #scene4, #scene5, #scene6 { opacity: 0; z-index: 2; }
+
+      /* ---------- SHARED DECORATIVES ---------- */
+      .top-rule {
+        position: absolute; top: 88px; left: 140px; right: 140px;
+        height: 1px; background: rgba(244, 237, 224, 0.14);
+        transform-origin: left center;
+      }
+      .bottom-rule {
+        position: absolute; bottom: 88px; left: 140px; right: 140px;
+        height: 1px; background: rgba(244, 237, 224, 0.10);
+        transform-origin: right center;
+      }
+      .brand-mark {
+        position: absolute; top: 56px; left: 140px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 18px; letter-spacing: 0.18em;
+        color: #a99f8a; font-weight: 500;
+      }
+      .brand-mark b { color: #f5a64a; font-weight: 600; }
+      .scene-index {
+        position: absolute; bottom: 50px; right: 140px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 18px; letter-spacing: 0.16em;
+        color: #e0d4ba; font-variant-numeric: tabular-nums;
+        font-weight: 500;
+      }
+      .scene-label {
+        position: absolute; bottom: 50px; left: 140px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 18px; letter-spacing: 0.22em;
+        color: #e0d4ba; text-transform: uppercase;
+        font-weight: 500;
+      }
+      .ghost {
+        position: absolute;
+        font-family: "Bricolage Grotesque", sans-serif;
+        font-weight: 800; color: #f5a64a;
+        opacity: 0.06; pointer-events: none;
+        letter-spacing: -0.04em; line-height: 0.85;
+      }
+      .glow {
+        position: absolute; border-radius: 50%;
+        filter: blur(80px); pointer-events: none;
+      }
+
+      .eyebrow {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 22px; letter-spacing: 0.32em;
+        color: #f5a64a; text-transform: uppercase;
+        font-weight: 500;
+      }
+
+      /* ---------- SCENE 1 — HOOK ---------- */
+      #s1-wave {
+        position: absolute; right: 140px; top: 50%;
+        transform: translateY(-50%);
+        display: flex; align-items: center; gap: 6px;
+        height: 320px; width: 520px;
+      }
+      #s1-wave .bar {
+        width: 8px; background: #f5a64a;
+        border-radius: 2px;
+        box-shadow: 0 0 18px rgba(245, 166, 74, 0.5);
+      }
+      .s1-title-stack {
+        margin-top: auto; margin-bottom: auto;
+        max-width: 1100px;
+      }
+      .s1-title-stack .eyebrow { margin-bottom: 28px; }
+      .s1-headline {
+        font-size: 156px; line-height: 0.92; letter-spacing: -0.045em;
+        font-weight: 800; color: #f4ede0;
+      }
+      .s1-headline .accent {
+        color: #f5a64a; font-weight: 300; font-style: italic;
+      }
+      .s1-subtitle {
+        margin-top: 36px; font-size: 30px; line-height: 1.4;
+        color: #a99f8a; font-weight: 300; max-width: 720px;
+        letter-spacing: 0.005em;
+      }
+
+      /* ---------- SCENE 2 — STEP 1 DROP ---------- */
+      .step-row {
+        display: flex; align-items: center; gap: 100px;
+        height: 100%; margin-top: 30px;
+      }
+      .step-num {
+        font-family: "Bricolage Grotesque", sans-serif;
+        font-size: 360px; line-height: 0.85;
+        font-weight: 800; letter-spacing: -0.06em;
+        color: #f5a64a; flex-shrink: 0;
+      }
+      .step-body { flex: 1; }
+      .step-heading {
+        font-size: 96px; line-height: 0.95;
+        letter-spacing: -0.035em; font-weight: 800; color: #f4ede0;
+        margin-bottom: 26px;
+      }
+      .step-sub {
+        font-size: 30px; color: #a99f8a; font-weight: 300;
+        line-height: 1.45; max-width: 760px; margin-bottom: 56px;
+      }
+      .upload-card {
+        position: relative;
+        border: 2px dashed rgba(245, 166, 74, 0.45);
+        background: rgba(245, 166, 74, 0.04);
+        padding: 36px 44px; border-radius: 18px;
+        max-width: 720px;
+        display: flex; align-items: center; gap: 28px;
+      }
+      .file-icon {
+        width: 72px; height: 72px; border-radius: 12px;
+        background: rgba(245, 166, 74, 0.18);
+        border: 1.5px solid rgba(245, 166, 74, 0.6);
+        display: flex; align-items: center; justify-content: center;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 14px; letter-spacing: 0.06em;
+        color: #f5a64a; font-weight: 600;
+      }
+      .file-meta { flex: 1; }
+      .file-name {
+        font-size: 26px; color: #f4ede0; font-weight: 500;
+        margin-bottom: 4px;
+      }
+      .file-size {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 18px; color: #b8ad97;
+        font-variant-numeric: tabular-nums;
+      }
+      .format-pills { display: flex; gap: 12px; margin-bottom: 22px; }
+      .pill {
+        padding: 8px 18px; border-radius: 999px;
+        border: 1.5px solid rgba(244, 237, 224, 0.18);
+        font-family: "JetBrains Mono", monospace;
+        font-size: 16px; letter-spacing: 0.1em;
+        color: #a99f8a; font-weight: 500;
+      }
+
+      /* ---------- SCENE 3 — STEP 2 AI ---------- */
+      .ai-stages { display: flex; flex-direction: column; gap: 28px; max-width: 880px; }
+      .stage {
+        display: flex; align-items: center; gap: 28px;
+        padding: 24px 32px;
+        border-left: 3px solid rgba(244, 237, 224, 0.12);
+      }
+      .stage.active { border-left-color: #f5a64a; }
+      .stage-check {
+        width: 44px; height: 44px; border-radius: 50%;
+        border: 2px solid rgba(244, 237, 224, 0.18);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 24px; color: #6f6757; flex-shrink: 0;
+      }
+      .stage.active .stage-check {
+        border-color: #f5a64a; background: #f5a64a; color: #0e1014;
+        box-shadow: 0 0 24px rgba(245, 166, 74, 0.4);
+      }
+      .stage-text { flex: 1; }
+      .stage-name {
+        font-size: 38px; color: #f4ede0; font-weight: 700;
+        letter-spacing: -0.01em; line-height: 1.1;
+        margin-bottom: 4px;
+      }
+      .stage.idle .stage-name { color: #a09681; }
+      .stage-meta {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 18px; color: #b8ad97;
+        letter-spacing: 0.08em;
+      }
+      .elapsed-tag {
+        position: absolute; right: 140px; top: 180px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 22px; color: #b8ad97;
+        letter-spacing: 0.16em; text-align: right;
+      }
+      .elapsed-tag .num {
+        display: block; font-size: 42px; color: #f5a64a;
+        font-variant-numeric: tabular-nums;
+        margin-top: 6px;
+      }
+
+      /* ---------- SCENE 4 — RESULTS ---------- */
+      .results-grid {
+        display: grid; grid-template-columns: 1.05fr 1fr;
+        gap: 44px; margin-top: 24px;
+      }
+      .res-card {
+        background: rgba(244, 237, 224, 0.03);
+        border: 1.5px solid rgba(244, 237, 224, 0.10);
+        border-radius: 18px; padding: 36px 38px;
+        position: relative;
+      }
+      .res-card-label {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 15px; letter-spacing: 0.22em;
+        color: #f5a64a; text-transform: uppercase;
+        margin-bottom: 22px;
+      }
+      .speaker-line { margin-bottom: 18px; line-height: 1.4; }
+      .speaker-tag {
+        display: inline-block;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 14px; letter-spacing: 0.1em;
+        padding: 4px 10px; border-radius: 6px;
+        margin-right: 14px;
+        font-weight: 600;
+        vertical-align: middle;
+      }
+      .sp-1 { background: rgba(245, 166, 74, 0.18); color: #f5a64a; }
+      .sp-2 { background: rgba(126, 168, 140, 0.18); color: #7ea88c; }
+      .speaker-text {
+        font-size: 24px; color: #d6cfc1;
+        font-weight: 300; line-height: 1.45;
+      }
+      .summary-line {
+        font-size: 26px; color: #e4ddcf;
+        font-weight: 300; line-height: 1.45;
+        margin-bottom: 14px;
+      }
+      .summary-line.key { color: #f4ede0; font-weight: 500; }
+      .summary-line .marker { color: #f5a64a; margin-right: 10px; }
+
+      .tabs {
+        display: flex; gap: 12px; margin-top: 36px;
+      }
+      .tab {
+        padding: 12px 22px; border-radius: 10px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 16px; letter-spacing: 0.12em;
+        border: 1.5px solid rgba(244, 237, 224, 0.14);
+        color: #d4c8af; text-transform: uppercase;
+        font-weight: 500;
+      }
+      .tab.active {
+        background: #f5a64a; color: #0e1014;
+        border-color: #f5a64a;
+      }
+
+      /* ---------- SCENE 5 — EXTRAS ---------- */
+      .extras-stack { margin-top: auto; margin-bottom: auto; }
+      .extras-headline {
+        font-size: 144px; line-height: 0.92;
+        letter-spacing: -0.045em; font-weight: 800;
+        margin-bottom: 56px; color: #f4ede0;
+      }
+      .extras-headline .accent {
+        color: #f5a64a; font-weight: 300; font-style: italic;
+      }
+      .feat-grid {
+        display: grid;
+        grid-template-columns: repeat(3, max-content);
+        gap: 18px 22px; max-width: 1400px;
+      }
+      .feat-pill {
+        padding: 22px 34px; border-radius: 14px;
+        border: 1.5px solid rgba(244, 237, 224, 0.14);
+        background: rgba(244, 237, 224, 0.025);
+        font-size: 30px; color: #f4ede0; font-weight: 500;
+        letter-spacing: -0.005em;
+        display: flex; align-items: center; gap: 18px;
+      }
+      .feat-dot {
+        width: 10px; height: 10px; border-radius: 50%;
+        background: #f5a64a; flex-shrink: 0;
+        box-shadow: 0 0 12px rgba(245, 166, 74, 0.6);
+      }
+
+      /* ---------- SCENE 6 — CTA ---------- */
+      #scene6 .scene-inner {
+        align-items: center; justify-content: center;
+        text-align: center; padding: 0;
+      }
+      .cta-stack { max-width: 1500px; }
+      .cta-eyebrow {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 22px; letter-spacing: 0.32em;
+        color: #f5a64a; text-transform: uppercase;
+        margin-bottom: 32px;
+      }
+      .cta-headline {
+        font-size: 188px; line-height: 0.92;
+        letter-spacing: -0.05em; font-weight: 800;
+        color: #f4ede0; margin-bottom: 36px;
+      }
+      .cta-headline .accent {
+        color: #f5a64a; font-style: italic; font-weight: 300;
+      }
+      .cta-sub {
+        font-size: 32px; color: #a99f8a; font-weight: 300;
+        margin-bottom: 56px;
+      }
+      .cta-url-card {
+        display: inline-flex; align-items: center; gap: 24px;
+        padding: 24px 44px; border-radius: 16px;
+        background: #f5a64a; color: #0e1014;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 30px; font-weight: 600;
+        letter-spacing: 0.02em;
+        box-shadow: 0 0 80px rgba(245, 166, 74, 0.35);
+      }
+      .cta-url-card .arrow {
+        font-size: 28px; transform: translateY(-1px);
+      }
+      .cta-stamp {
+        position: absolute; bottom: 60px; left: 50%;
+        transform: translateX(-50%);
+        font-family: "JetBrains Mono", monospace;
+        font-size: 17px; letter-spacing: 0.28em;
+        color: #b8ad97; text-transform: uppercase;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="26.5"
+      data-width="1920"
+      data-height="1080"
+    >
+      <!-- ============ SCENE 1 — HOOK ============ -->
+      <div id="scene1" class="scene">
+        <div class="glow" data-layout-allow-overflow id="s1-glow" style="width: 900px; height: 900px; right: -240px; bottom: -300px; background: radial-gradient(circle, rgba(245,166,74,0.55), rgba(245,166,74,0));"></div>
+        <div class="ghost" data-layout-allow-overflow id="s1-ghost" style="font-size: 520px; left: -60px; bottom: -180px;">audio</div>
+        <div class="scene-inner">
+          <div class="top-rule" id="s1-top-rule"></div>
+          <div class="brand-mark" id="s1-brand">AUDIO · SUMMARISER &nbsp;&nbsp; <b>▸</b></div>
+
+          <div class="s1-title-stack">
+            <div class="eyebrow" id="s1-eyebrow">AI TRANSCRIBE · SPEAKER LABELS · SUMMARIZE</div>
+            <h1 class="s1-headline">
+              <span id="s1-h1">Audio in.</span><br/>
+              <span class="accent" id="s1-h2">Insight out.</span>
+            </h1>
+            <p class="s1-subtitle" id="s1-sub">
+              Drop a recording. Get a clean transcript, AI summary,
+              key points, and a chat that can answer questions from it.
+            </p>
+          </div>
+
+          <div id="s1-wave">
+            <div class="bar" style="height: 32%;"></div>
+            <div class="bar" style="height: 68%;"></div>
+            <div class="bar" style="height: 44%;"></div>
+            <div class="bar" style="height: 88%;"></div>
+            <div class="bar" style="height: 56%;"></div>
+            <div class="bar" style="height: 96%;"></div>
+            <div class="bar" style="height: 38%;"></div>
+            <div class="bar" style="height: 72%;"></div>
+            <div class="bar" style="height: 48%;"></div>
+            <div class="bar" style="height: 84%;"></div>
+            <div class="bar" style="height: 28%;"></div>
+            <div class="bar" style="height: 64%;"></div>
+            <div class="bar" style="height: 52%;"></div>
+            <div class="bar" style="height: 78%;"></div>
+            <div class="bar" style="height: 40%;"></div>
+            <div class="bar" style="height: 60%;"></div>
+            <div class="bar" style="height: 92%;"></div>
+            <div class="bar" style="height: 46%;"></div>
+            <div class="bar" style="height: 70%;"></div>
+            <div class="bar" style="height: 34%;"></div>
+            <div class="bar" style="height: 58%;"></div>
+            <div class="bar" style="height: 82%;"></div>
+            <div class="bar" style="height: 42%;"></div>
+            <div class="bar" style="height: 66%;"></div>
+          </div>
+
+          <div class="bottom-rule" id="s1-bot-rule"></div>
+          <div class="scene-label" id="s1-label">▸ Intro</div>
+          <div class="scene-index" id="s1-idx">01 / 06</div>
+        </div>
+      </div>
+
+      <!-- ============ SCENE 2 — STEP 1 DROP ============ -->
+      <div id="scene2" class="scene">
+        <div class="glow" data-layout-allow-overflow style="width: 700px; height: 700px; left: -200px; top: -180px; background: radial-gradient(circle, rgba(245,166,74,0.35), rgba(245,166,74,0));"></div>
+        <div class="ghost" data-layout-allow-overflow id="s2-ghost" style="font-size: 440px; right: -80px; bottom: -120px;">drop</div>
+        <div class="scene-inner">
+          <div class="top-rule" id="s2-top-rule"></div>
+          <div class="brand-mark">AUDIO · SUMMARISER &nbsp;&nbsp; <b>▸</b></div>
+
+          <div class="step-row">
+            <div class="step-num" id="s2-num">01</div>
+            <div class="step-body">
+              <div class="eyebrow" id="s2-eb" style="margin-bottom: 24px;">SIGN IN · UPLOAD</div>
+              <div class="step-heading" id="s2-heading">Drop your file.</div>
+              <div class="step-sub" id="s2-sub">
+                Sign in with Google, then drag any recording onto the dashboard.
+              </div>
+              <div class="format-pills" id="s2-pills">
+                <div class="pill">MP3</div>
+                <div class="pill">WAV</div>
+                <div class="pill">M4A</div>
+                <div class="pill">UP TO 25MB</div>
+              </div>
+              <div class="upload-card" id="s2-card">
+                <div class="file-icon">MP3</div>
+                <div class="file-meta">
+                  <div class="file-name">client-interview.mp3</div>
+                  <div class="file-size">12.4 MB &nbsp;·&nbsp; 18:24 duration</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="bottom-rule" id="s2-bot-rule"></div>
+          <div class="scene-label">▸ Step 01</div>
+          <div class="scene-index">02 / 06</div>
+        </div>
+      </div>
+
+      <!-- ============ SCENE 3 — STEP 2 AI ============ -->
+      <div id="scene3" class="scene">
+        <div class="glow" data-layout-allow-overflow style="width: 750px; height: 750px; right: -200px; top: -180px; background: radial-gradient(circle, rgba(245,166,74,0.30), rgba(245,166,74,0));"></div>
+        <div class="ghost" data-layout-allow-overflow id="s3-ghost" style="font-size: 420px; left: -60px; bottom: -120px;">AI</div>
+        <div class="scene-inner">
+          <div class="top-rule" id="s3-top-rule"></div>
+          <div class="brand-mark">AUDIO · SUMMARISER &nbsp;&nbsp; <b>▸</b></div>
+
+          <div class="elapsed-tag" id="s3-elapsed">
+            ELAPSED
+            <span class="num">00:42</span>
+          </div>
+
+          <div class="step-row">
+            <div class="step-num" id="s3-num">02</div>
+            <div class="step-body">
+              <div class="eyebrow" id="s3-eb" style="margin-bottom: 24px;">PIPELINE</div>
+              <div class="step-heading" id="s3-heading">AI does the work.</div>
+              <div class="step-sub" id="s3-sub">
+                Transcription, diarization, and summarization run in one job.
+              </div>
+              <div class="ai-stages">
+                <div class="stage active" id="s3-stage1">
+                  <div class="stage-check">✓</div>
+                  <div class="stage-text">
+                    <div class="stage-name">Transcribe</div>
+                    <div class="stage-meta">ASSEMBLYAI · WHISPER FALLBACK</div>
+                  </div>
+                </div>
+                <div class="stage active" id="s3-stage2">
+                  <div class="stage-check">✓</div>
+                  <div class="stage-text">
+                    <div class="stage-name">Identify speakers</div>
+                    <div class="stage-meta">NATIVE DIARIZATION · LLAMA FALLBACK</div>
+                  </div>
+                </div>
+                <div class="stage idle" id="s3-stage3">
+                  <div class="stage-check">●</div>
+                  <div class="stage-text">
+                    <div class="stage-name">Summarize &amp; extract</div>
+                    <div class="stage-meta">GROQ LLAMA 3.3 · 70B</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="bottom-rule" id="s3-bot-rule"></div>
+          <div class="scene-label">▸ Step 02</div>
+          <div class="scene-index">03 / 06</div>
+        </div>
+      </div>
+
+      <!-- ============ SCENE 4 — STEP 3 RESULTS ============ -->
+      <div id="scene4" class="scene">
+        <div class="glow" data-layout-allow-overflow style="width: 720px; height: 720px; left: 50%; top: 60%; background: radial-gradient(circle, rgba(245,166,74,0.20), rgba(245,166,74,0));"></div>
+        <div class="ghost" data-layout-allow-overflow id="s4-ghost" style="font-size: 380px; left: -40px; top: -80px;">read</div>
+        <div class="scene-inner">
+          <div class="top-rule" id="s4-top-rule"></div>
+          <div class="brand-mark">AUDIO · SUMMARISER &nbsp;&nbsp; <b>▸</b></div>
+
+          <div style="margin-top: 8px;">
+            <div class="eyebrow" id="s4-eb" style="margin-bottom: 18px;">03 · RESULTS</div>
+            <div class="step-heading" id="s4-heading" style="font-size: 96px; margin-bottom: 12px;">
+              Read, search, chat.
+            </div>
+            <div class="step-sub" id="s4-sub" style="max-width: 1200px; margin-bottom: 28px;">
+              Transcript with synced playback. Summary and key points. Ask follow-up questions on the side.
+            </div>
+          </div>
+
+          <div class="results-grid">
+            <div class="res-card" id="s4-card-tx">
+              <div class="res-card-label">▸ Transcript · Speakers</div>
+              <div class="speaker-line">
+                <span class="speaker-tag sp-1">SPEAKER 1</span>
+                <span class="speaker-text">So can we lock the Friday ship date?</span>
+              </div>
+              <div class="speaker-line">
+                <span class="speaker-tag sp-2">SPEAKER 2</span>
+                <span class="speaker-text">Yes — EOD Friday works. I'll handle release notes.</span>
+              </div>
+              <div class="speaker-line">
+                <span class="speaker-tag sp-1">SPEAKER 1</span>
+                <span class="speaker-text">Perfect. I'll send the kickoff email after this call.</span>
+              </div>
+            </div>
+            <div class="res-card" id="s4-card-sum">
+              <div class="res-card-label">▸ Summary · Key Points</div>
+              <div class="summary-line key">
+                <span class="marker">●</span>Friday ship date confirmed.
+              </div>
+              <div class="summary-line">
+                <span class="marker">●</span>Speaker 2 to draft release notes.
+              </div>
+              <div class="summary-line">
+                <span class="marker">●</span>Speaker 1 to send kickoff email post-call.
+              </div>
+              <div class="summary-line" style="margin-top: 14px; color: #c2b9a4; font-size: 22px;">
+                3 action items · 1 deadline · 2 owners
+              </div>
+            </div>
+          </div>
+
+          <div class="tabs" id="s4-tabs">
+            <div class="tab">▸ Synced</div>
+            <div class="tab active">Summary</div>
+            <div class="tab">Key points</div>
+            <div class="tab">Chat</div>
+            <div class="tab">PDF</div>
+          </div>
+
+          <div class="bottom-rule" id="s4-bot-rule"></div>
+          <div class="scene-label">▸ Step 03</div>
+          <div class="scene-index">04 / 06</div>
+        </div>
+      </div>
+
+      <!-- ============ SCENE 5 — EXTRAS ============ -->
+      <div id="scene5" class="scene">
+        <div class="glow" data-layout-allow-overflow style="width: 800px; height: 800px; right: -200px; bottom: -200px; background: radial-gradient(circle, rgba(126,168,140,0.22), rgba(126,168,140,0));"></div>
+        <div class="ghost" data-layout-allow-overflow id="s5-ghost" style="font-size: 460px; right: -120px; top: -100px;">more</div>
+        <div class="scene-inner">
+          <div class="top-rule" id="s5-top-rule"></div>
+          <div class="brand-mark">AUDIO · SUMMARISER &nbsp;&nbsp; <b>▸</b></div>
+
+          <div class="extras-stack">
+            <div class="eyebrow" id="s5-eb" style="margin-bottom: 30px;">ALSO INCLUDED</div>
+            <div class="extras-headline">
+              <span id="s5-h1">Everything</span><br/>
+              <span class="accent" id="s5-h2">else.</span>
+            </div>
+            <div class="feat-grid" id="s5-grid">
+              <div class="feat-pill"><span class="feat-dot"></span>Speaker labels</div>
+              <div class="feat-pill"><span class="feat-dot"></span>Compare transcripts</div>
+              <div class="feat-pill"><span class="feat-dot"></span>Merge into one note</div>
+              <div class="feat-pill"><span class="feat-dot"></span>PDF export</div>
+              <div class="feat-pill"><span class="feat-dot"></span>Saved history</div>
+              <div class="feat-pill"><span class="feat-dot"></span>Synced playback</div>
+            </div>
+          </div>
+
+          <div class="bottom-rule" id="s5-bot-rule"></div>
+          <div class="scene-label">▸ Extras</div>
+          <div class="scene-index">05 / 06</div>
+        </div>
+      </div>
+
+      <!-- ============ SCENE 6 — CTA ============ -->
+      <div id="scene6" class="scene">
+        <div class="glow" data-layout-allow-overflow id="s6-glow" style="width: 1400px; height: 1400px; left: 50%; top: 50%; transform: translate(-50%, -50%); background: radial-gradient(circle, rgba(245,166,74,0.45), rgba(245,166,74,0));"></div>
+        <div class="ghost" data-layout-allow-overflow id="s6-ghost" style="font-size: 620px; left: 50%; transform: translateX(-50%); top: -260px; opacity: 0.045;">try</div>
+        <div class="scene-inner">
+          <div class="cta-stack">
+            <div class="cta-eyebrow" id="s6-eb">▸ READY WHEN YOU ARE</div>
+            <h1 class="cta-headline">
+              <span id="s6-h1">Try it</span>
+              <span class="accent" id="s6-h2">free.</span>
+            </h1>
+            <p class="cta-sub" id="s6-sub">
+              Sign in with Google. 100 credits to start. No card.
+            </p>
+            <div class="cta-url-card" id="s6-url">
+              <span>audio-transcriber-summariser.vercel.app</span>
+              <span class="arrow">→</span>
+            </div>
+          </div>
+          <div class="cta-stamp" id="s6-stamp">▸ ASSEMBLYAI · GROQ · SUPABASE</div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      // ---------- helper ----------
+      // Push transition: outgoing slides left, incoming slides in from right.
+      function pushTransition(outId, inId, t, dur = 0.42) {
+        // incoming becomes visible just before motion
+        tl.set("#" + inId, { opacity: 1, x: 1920 }, t);
+        tl.to("#" + inId, { x: 0, duration: dur, ease: "power3.inOut" }, t);
+        tl.to("#" + outId, { x: -1920, duration: dur, ease: "power3.inOut" }, t);
+        // hide outgoing after to keep the canvas clean
+        tl.set("#" + outId, { opacity: 0 }, t + dur);
+      }
+
+      // Blur crossfade: incoming fades up with blur clear, outgoing blurs out
+      function blurFade(outId, inId, t, dur = 0.5) {
+        tl.set("#" + inId, { opacity: 0, filter: "blur(18px)" }, t);
+        tl.to("#" + inId, { opacity: 1, filter: "blur(0px)", duration: dur, ease: "power2.out" }, t);
+        tl.to("#" + outId, { opacity: 0, filter: "blur(18px)", duration: dur * 0.85, ease: "power2.in" }, t);
+        tl.set("#" + outId, { opacity: 0, filter: "blur(0px)" }, t + dur);
+      }
+
+      // ============================================================
+      // SCENE 1 — HOOK   (0 — 4.0)
+      // ============================================================
+      tl.fromTo("#s1-top-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.7, ease: "expo.out" }, 0.15);
+      tl.fromTo("#s1-brand", { y: -20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: "power2.out" }, 0.35);
+      tl.fromTo("#s1-eyebrow", { y: 24, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: "power2.out" }, 0.5);
+      tl.fromTo("#s1-h1", { y: 70, opacity: 0 }, { y: 0, opacity: 1, duration: 0.7, ease: "expo.out" }, 0.65);
+      tl.fromTo("#s1-h2", { y: 70, opacity: 0 }, { y: 0, opacity: 1, duration: 0.7, ease: "expo.out" }, 0.85);
+      tl.fromTo("#s1-sub", { y: 24, opacity: 0 }, { y: 0, opacity: 1, duration: 0.55, ease: "power2.out" }, 1.1);
+
+      // wave bars stagger in
+      tl.fromTo("#s1-wave .bar",
+        { scaleY: 0, opacity: 0 },
+        { scaleY: 1, opacity: 1, duration: 0.4, ease: "back.out(1.8)",
+          stagger: { each: 0.018, from: "center" }, transformOrigin: "50% 50%" },
+        0.7);
+
+      // ambient: wave breathing
+      tl.to("#s1-wave .bar",
+        { scaleY: 0.55, duration: 0.85, ease: "sine.inOut",
+          yoyo: true, repeat: 3,
+          stagger: { each: 0.04, from: "center", yoyo: true, repeat: 3 },
+          transformOrigin: "50% 50%" },
+        1.4);
+
+      // ambient: glow breathe
+      tl.to("#s1-glow", { scale: 1.1, duration: 1.8, ease: "sine.inOut", yoyo: true, repeat: 1, transformOrigin: "50% 50%" }, 0.5);
+
+      tl.fromTo("#s1-bot-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.7, ease: "expo.out" }, 0.4);
+      tl.fromTo("#s1-label", { x: -20, opacity: 0 }, { x: 0, opacity: 1, duration: 0.45, ease: "power2.out" }, 0.95);
+      tl.fromTo("#s1-idx", { x: 20, opacity: 0 }, { x: 0, opacity: 1, duration: 0.45, ease: "power2.out" }, 0.95);
+
+      // ============================================================
+      // TRANSITION 1 → 2 at 3.85   (push slide)
+      // ============================================================
+      pushTransition("scene1", "scene2", 3.85, 0.42);
+
+      // ============================================================
+      // SCENE 2 — DROP   (4.27 — 8.5)
+      // ============================================================
+      tl.fromTo("#s2-top-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "expo.out" }, 4.35);
+      tl.fromTo("#s2-num",
+        { x: -80, opacity: 0, scale: 0.9 },
+        { x: 0, opacity: 1, scale: 1, duration: 0.7, ease: "power3.out" }, 4.5);
+      tl.fromTo("#s2-eb", { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: "power2.out" }, 4.7);
+      tl.fromTo("#s2-heading", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "expo.out" }, 4.8);
+      tl.fromTo("#s2-sub", { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: "power2.out" }, 5.0);
+      tl.fromTo("#s2-pills .pill",
+        { y: 14, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.4, ease: "back.out(1.5)", stagger: 0.06 },
+        5.2);
+      tl.fromTo("#s2-card",
+        { y: 30, opacity: 0, scale: 0.96 },
+        { y: 0, opacity: 1, scale: 1, duration: 0.55, ease: "power3.out" }, 5.55);
+
+      // ambient: card border pulse via box-shadow proxy (scale subtle)
+      tl.to("#s2-card", { boxShadow: "0 0 60px rgba(245, 166, 74, 0.25)", duration: 1.6, ease: "sine.inOut", yoyo: true, repeat: 1 }, 6.0);
+
+      // step num drift
+      tl.to("#s2-num", { y: -14, duration: 1.8, ease: "sine.inOut", yoyo: true, repeat: 1 }, 5.2);
+
+      tl.fromTo("#s2-bot-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "expo.out" }, 4.6);
+
+      // ============================================================
+      // TRANSITION 2 → 3 at 8.18   (push slide)
+      // ============================================================
+      pushTransition("scene2", "scene3", 8.18, 0.42);
+
+      // ============================================================
+      // SCENE 3 — AI PIPELINE   (8.60 — 12.8)
+      // ============================================================
+      tl.fromTo("#s3-top-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "expo.out" }, 8.65);
+      tl.fromTo("#s3-num",
+        { x: -80, opacity: 0, scale: 0.9 },
+        { x: 0, opacity: 1, scale: 1, duration: 0.7, ease: "power3.out" }, 8.78);
+      tl.fromTo("#s3-eb", { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: "power2.out" }, 8.95);
+      tl.fromTo("#s3-heading", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "expo.out" }, 9.05);
+      tl.fromTo("#s3-sub", { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: "power2.out" }, 9.25);
+
+      // stages cascade in idle, then flip to active
+      tl.set(["#s3-stage1", "#s3-stage2", "#s3-stage3"], { opacity: 0, x: 40 }, 9.3);
+      tl.to("#s3-stage1", { opacity: 1, x: 0, duration: 0.45, ease: "power3.out" }, 9.4);
+      tl.to("#s3-stage2", { opacity: 1, x: 0, duration: 0.45, ease: "power3.out" }, 9.65);
+      tl.to("#s3-stage3", { opacity: 1, x: 0, duration: 0.45, ease: "power3.out" }, 9.9);
+
+      tl.fromTo("#s3-elapsed",
+        { y: -16, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.5, ease: "back.out(1.4)" }, 9.5);
+
+      // active glow pulse on stage1 + stage2
+      tl.to(["#s3-stage1 .stage-check", "#s3-stage2 .stage-check"],
+        { scale: 1.12, duration: 0.5, ease: "sine.inOut", yoyo: true, repeat: 2, stagger: 0.12, transformOrigin: "50% 50%" }, 10.4);
+
+      tl.fromTo("#s3-bot-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "expo.out" }, 8.9);
+
+      // ============================================================
+      // TRANSITION 3 → 4 at 12.48   (push slide)
+      // ============================================================
+      pushTransition("scene3", "scene4", 12.48, 0.42);
+
+      // ============================================================
+      // SCENE 4 — RESULTS   (12.90 — 17.8)
+      // ============================================================
+      tl.fromTo("#s4-top-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "expo.out" }, 12.95);
+      tl.fromTo("#s4-eb", { y: 16, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: "power2.out" }, 13.05);
+      tl.fromTo("#s4-heading", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "expo.out" }, 13.2);
+      tl.fromTo("#s4-sub", { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: "power2.out" }, 13.42);
+
+      // cards
+      tl.fromTo("#s4-card-tx",
+        { x: -50, opacity: 0 },
+        { x: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 13.55);
+      tl.fromTo("#s4-card-sum",
+        { x: 50, opacity: 0 },
+        { x: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 13.7);
+
+      // speaker lines pop in
+      tl.fromTo("#s4-card-tx .speaker-line",
+        { y: 18, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.35, ease: "power2.out", stagger: 0.14 }, 13.95);
+      tl.fromTo("#s4-card-sum .summary-line",
+        { y: 14, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.35, ease: "power2.out", stagger: 0.12 }, 14.1);
+
+      // tabs cascade
+      tl.fromTo("#s4-tabs .tab",
+        { y: 18, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.35, ease: "back.out(1.4)", stagger: 0.07 }, 14.95);
+
+      // active tab pulse
+      tl.to("#s4-tabs .tab.active", { boxShadow: "0 0 28px rgba(245, 166, 74, 0.55)", duration: 0.7, ease: "sine.inOut", yoyo: true, repeat: 1 }, 15.6);
+
+      tl.fromTo("#s4-bot-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "expo.out" }, 13.0);
+
+      // ============================================================
+      // TRANSITION 4 → 5 at 17.48   (blur crossfade — register shift)
+      // ============================================================
+      blurFade("scene4", "scene5", 17.48, 0.55);
+
+      // ============================================================
+      // SCENE 5 — EXTRAS   (18.03 — 21.8)
+      // ============================================================
+      tl.fromTo("#s5-top-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "expo.out" }, 18.1);
+      tl.fromTo("#s5-eb", { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: "power2.out" }, 18.25);
+      tl.fromTo("#s5-h1", { y: 60, opacity: 0 }, { y: 0, opacity: 1, duration: 0.65, ease: "expo.out" }, 18.35);
+      tl.fromTo("#s5-h2", { y: 60, opacity: 0 }, { y: 0, opacity: 1, duration: 0.65, ease: "expo.out" }, 18.55);
+
+      // feat pills cascade — two-row stagger
+      tl.fromTo("#s5-grid .feat-pill",
+        { y: 26, opacity: 0, scale: 0.96 },
+        { y: 0, opacity: 1, scale: 1, duration: 0.42, ease: "back.out(1.4)", stagger: 0.07 }, 18.85);
+
+      // dot pulses
+      tl.to("#s5-grid .feat-dot",
+        { scale: 1.6, duration: 0.45, ease: "sine.inOut", yoyo: true, repeat: 1, stagger: { each: 0.06, from: "start" }, transformOrigin: "50% 50%" },
+        19.8);
+
+      tl.fromTo("#s5-bot-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "expo.out" }, 18.2);
+
+      // ============================================================
+      // TRANSITION 5 → 6 at 21.55   (blur crossfade — gentle outro lead-in)
+      // ============================================================
+      blurFade("scene5", "scene6", 21.55, 0.6);
+
+      // ============================================================
+      // SCENE 6 — CTA   (22.15 — 26.5)  [FINAL SCENE — exits allowed]
+      // ============================================================
+      tl.fromTo("#s6-eb", { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: "power2.out" }, 22.25);
+      tl.fromTo("#s6-h1",
+        { y: 80, opacity: 0, scale: 0.96 },
+        { y: 0, opacity: 1, scale: 1, duration: 0.75, ease: "expo.out" }, 22.4);
+      tl.fromTo("#s6-h2",
+        { y: 80, opacity: 0, scale: 0.96 },
+        { y: 0, opacity: 1, scale: 1, duration: 0.75, ease: "expo.out" }, 22.55);
+      tl.fromTo("#s6-sub", { y: 22, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: "power2.out" }, 22.85);
+      tl.fromTo("#s6-url",
+        { y: 24, opacity: 0, scale: 0.94 },
+        { y: 0, opacity: 1, scale: 1, duration: 0.55, ease: "back.out(1.5)" }, 23.1);
+
+      // ambient glow swell
+      tl.to("#s6-glow",
+        { scale: 1.15, duration: 2.0, ease: "sine.inOut", yoyo: true, repeat: 1, transformOrigin: "50% 50%" }, 22.4);
+
+      // url card breathing
+      tl.to("#s6-url",
+        { boxShadow: "0 0 120px rgba(245, 166, 74, 0.55)", duration: 1.2, ease: "sine.inOut", yoyo: true, repeat: 1 }, 23.7);
+
+      tl.fromTo("#s6-stamp", { y: 12, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: "power2.out" }, 23.4);
+
+      // final fade out — only allowed on last scene
+      tl.to("#scene6", { opacity: 0, duration: 0.6, ease: "power2.in" }, 25.85);
+      tl.set("#scene6", { visibility: "hidden" }, 26.45);
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>
