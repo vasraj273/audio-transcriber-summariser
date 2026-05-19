@@ -133,6 +133,17 @@ async def _dispatch_update(update: dict) -> None:
         await telegram_service.send_message(chat_id, telegram_service.welcome_text())
         return
 
+    if text.startswith("/exit") or text.startswith("/cancel") or text.startswith("/stop"):
+        was_ask = _ASK_MODE.pop(chat_id, None)
+        was_email = _AWAITING_EMAIL.pop(chat_id, None)
+        if was_ask:
+            await telegram_service.send_message(chat_id, "Exited ask mode. Send audio to transcribe.")
+        elif was_email:
+            await telegram_service.send_message(chat_id, "Email cancelled.")
+        else:
+            await telegram_service.send_message(chat_id, "Nothing to exit. Send audio to transcribe.")
+        return
+
     # Audio-bearing message?
     media = _extract_media(message)
     if media:
@@ -395,7 +406,7 @@ async def _handle_callback(callback: dict) -> None:
             await telegram_service.send_message(
                 chat_id,
                 "💬 Ask mode is on. Send a question and I'll answer using this audio. "
-                "Send /start to exit ask mode.",
+                "Send /exit to leave ask mode.",
             )
         else:
             await telegram_service.answer_callback_query(callback_id, "Unknown action.")
@@ -650,7 +661,7 @@ async def _action_translate(chat_id: int, record_id: str, message_id: Optional[i
 # ---------------------------------------------------------------------------
 
 async def _handle_ask_reply(chat_id: int, record_id: str, question: str) -> None:
-    # /start exits ask mode — handled earlier in dispatch. Anything else is a question.
+    # /exit and /start exits ask mode — handled earlier in dispatch. Anything else is a question.
     record = _fetch_record_by_id(record_id)
     if not record:
         _ASK_MODE.pop(chat_id, None)
