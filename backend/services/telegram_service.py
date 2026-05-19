@@ -214,6 +214,20 @@ def _html_escape(text: str) -> str:
     )
 
 
+_URGENT_KEYWORDS = (
+    "today", "tomorrow", "tonight", "urgent", "urgently", "asap",
+    "immediately", "right now", "deadline", "due now", "by end of day",
+    "eod", "by tomorrow",
+)
+
+
+def _is_urgent_text(text: str) -> bool:
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(kw in lowered for kw in _URGENT_KEYWORDS)
+
+
 def _format_duration(seconds: float) -> str:
     seconds = int(seconds or 0)
     if seconds <= 0:
@@ -321,7 +335,8 @@ def format_actions_reply(transcript_row: dict, extracted: dict | None) -> str:
     if tasks:
         action_bullets = []
         for task in tasks:
-            title = _html_escape(str(task.get("title") or "").strip())
+            title_raw = str(task.get("title") or "").strip()
+            title = _html_escape(title_raw)
             if not title:
                 continue
             extras = []
@@ -335,7 +350,10 @@ def format_actions_reply(transcript_row: dict, extracted: dict | None) -> str:
             elif due_date:
                 extras.append(_html_escape(due_date))
             suffix = f" <i>({', '.join(extras)})</i>" if extras else ""
-            action_bullets.append(f"• {title}{suffix}")
+            descr_raw = str(task.get("description") or "").strip()
+            urgent = _is_urgent_text(f"{title_raw} {descr_raw}")
+            prefix = "🔴 " if urgent else ""
+            action_bullets.append(f"• {prefix}{title}{suffix}")
         action_block = "\n".join(action_bullets) or "• (none extracted)"
     else:
         key_points = transcript_row.get("key_points") or []
@@ -506,13 +524,20 @@ def help_text() -> str:
     return (
         "<b>Commands:</b>\n"
         "/start — show welcome\n"
+        "/digest — today's AI brief\n"
+        "/stats — productivity score\n"
+        "/topics — recurring themes (7 days)\n"
+        "/people — important people (7 days)\n"
         "/tasks or /pending — list pending action items\n"
         "/completed — list completed action items\n"
+        "/timezone &lt;TZ&gt; — set your timezone, e.g. /timezone Asia/Kolkata\n"
+        "/digest_on or /digest_off — toggle daily auto-digest\n"
         "/exit — leave ask / email mode\n"
         "/help — this message\n\n"
         "<b>Tips:</b>\n"
         "• Send any audio, voice note, or video — I'll transcribe, summarise, and extract tasks.\n"
         "• Use the inline buttons to mark Done, export to Calendar (.ics), Email, Translate, Ask, or Dismiss.\n"
+        "• 🔴 = urgent task (mentions today / tomorrow / urgent / deadline / asap).\n"
     )
 
 

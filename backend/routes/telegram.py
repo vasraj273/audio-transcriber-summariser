@@ -36,8 +36,10 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
 
+from datetime import date, datetime, timezone
+
 from routes.process import process_audio_file
-from services import actions_service, telegram_service
+from services import actions_service, digest_service, telegram_service, topic_analysis_service
 from services.analytics_service import record_transcript_event
 from services.groq_service import chat_with_audio, summarise_transcript
 from services.supabase_service import (
@@ -127,6 +129,12 @@ async def _dispatch_update(update: dict) -> None:
     if chat_id is None:
         return
 
+    # First-touch: best-effort upsert of telegram_chat_prefs row.
+    try:
+        digest_service.upsert_chat_prefs(chat_id, _chat_user_id(chat_id))
+    except Exception:
+        logger.exception("[Telegram] upsert_chat_prefs failed for chat_id=%s", chat_id)
+
     # /start (or any /command)
     text = (message.get("text") or "").strip()
     if text.startswith("/start"):
@@ -145,6 +153,35 @@ async def _dispatch_update(update: dict) -> None:
 
     if text.startswith("/completed"):
         await _send_action_list(chat_id, status="done", header="✅ <b>Completed tasks</b>")
+        return
+
+    if text.startswith("/digest"):
+        # /digest_on and /digest_off handled here too.
+        if text.startswith("/digest_on"):
+            digest_service.set_digest_enabled(chat_id, True)
+            await telegram_service.send_message(chat_id, "✅ Daily digest enabled.")
+            return
+        if text.startswith("/digest_off"):
+            digest_service.set_digest_enabled(chat_id, False)
+            await telegram_service.send_message(chat_id, "🔕 Daily digest disabled.")
+            return
+        await _send_digest(chat_id)
+        return
+
+    if text.startswith("/stats"):
+        await _send_stats(chat_id)
+        return
+
+    if text.startswith("/topics"):
+        await _send_topics(chat_id)
+        return
+
+    if text.startswith("/people"):
+        await _send_people(chat_id)
+        return
+
+    if text.startswith("/timezone"):
+        await _handle_timezone(chat_id, text)
         return
 
     if text.startswith("/exit") or text.startswith("/cancel") or text.startswith("/stop"):
@@ -330,6 +367,12 @@ async def _handle_audio_message(chat_id: int, message: dict, media: dict) -> Non
                     actions_service.save_action_items(user_id, record_id, extracted)
                 except Exception:
                     logger.exception("[Telegram] save_action_items failed for record %s", record_id)
+                try:
+                    actions_service.mark_urgent_for_transcript(
+                        record_id, result.get("transcript") or ""
+                    )
+                except Exception:
+                    logger.exception("[Telegram] mark_urgent_for_transcript failed for record %s", record_id)
         except Exception:
             logger.exception("[Telegram] extract_actions failed for record %s", record_id)
             extracted = None
@@ -878,6 +921,159 @@ async def _send_action_list(chat_id: int, status: str, header: str) -> None:
         )
         lines.append(f"{index}. {title_esc}{suffix_esc}")
     await telegram_service.send_message(chat_id, "\n".join(lines))
+
+
+# ---------------------------------------------------------------------------
+# /digest /stats /topics /people /timezone
+# ---------------------------------------------------------------------------
+
+async def _send_digest(chat_id: int) -> None:
+    user_id = _chat_user_id(chat_id)
+    prefs = digest_service.get_chat_prefs(chat_id) or {}
+    tz_name = prefs.get("timezone") or "UTC"
+
+    cached = digest_service.get_cached_digest(user_id, date.today())
+    if cached and cached.get("summary"):
+        await telegram_service.send_message(chat_id, cached["summary"])
+        return
+
+    try:
+        result = digest_service.build_today_digest(
+            user_id=user_id, chat_id=chat_id, tz_name=tz_name
+        )
+    except Exception:
+        logger.exception("[Telegram] build_today_digest failed for chat %s", chat_id)
+        await telegram_service.send_message(chat_id, "Couldn't build digest right now.")
+        return
+
+    text = (result.get("summary_text") or "").strip()
+    if not text:
+        await telegram_service.send_message(chat_id, "Nothing to digest yet today.")
+        return
+
+    metadata = result.get("metadata") or {}
+    try:
+        digest_date_iso = metadata.get("date") or date.today().isoformat()
+        digest_service.save_digest(
+            user_id=user_id,
+            digest_date=date.fromisoformat(digest_date_iso),
+            summary_text=text,
+            metadata=metadata,
+        )
+    except Exception:
+        logger.exception("[Telegram] save_digest failed for chat %s", chat_id)
+
+    await telegram_service.send_message(chat_id, text)
+
+
+async def _send_stats(chat_id: int) -> None:
+    user_id = _chat_user_id(chat_id)
+    prefs = digest_service.get_chat_prefs(chat_id) or {}
+    tz_name = prefs.get("timezone") or "UTC"
+
+    try:
+        result = digest_service.build_today_digest(
+            user_id=user_id, chat_id=chat_id, tz_name=tz_name
+        )
+    except Exception:
+        logger.exception("[Telegram] _send_stats failed for chat %s", chat_id)
+        await telegram_service.send_message(chat_id, "Couldn't compute stats right now.")
+        return
+
+    metadata = result.get("metadata") or {}
+    prod = metadata.get("productivity") or {}
+    score = int(prod.get("score") or 0)
+    completion = int(prod.get("completion_pct") or 0)
+    done = int(prod.get("tasks_done") or 0)
+    pending = int(prod.get("tasks_pending") or 0)
+    recordings = int(metadata.get("recordings") or 0)
+    total_seconds = float(metadata.get("total_seconds") or 0)
+
+    duration_str = "0m"
+    try:
+        from services.productivity_service import format_duration
+        duration_str = format_duration(total_seconds)
+    except Exception:
+        pass
+
+    body = (
+        "📊 <b>Today's stats</b>\n\n"
+        f"<b>Productivity score:</b> {score}/100\n"
+        f"<b>Completion:</b> {completion}%\n"
+        f"<b>Tasks done:</b> {done}\n"
+        f"<b>Tasks pending:</b> {pending}\n"
+        f"<b>Recordings:</b> {recordings}\n"
+        f"<b>Audio processed:</b> {duration_str}"
+    )
+    await telegram_service.send_message(chat_id, body)
+
+
+async def _send_topics(chat_id: int) -> None:
+    user_id = _chat_user_id(chat_id)
+    # Refresh cache first so user gets up-to-date themes.
+    try:
+        topic_analysis_service.refresh_topic_window(user_id, days=7)
+    except Exception:
+        logger.exception("[Telegram] refresh_topic_window failed for chat %s", chat_id)
+
+    topics = topic_analysis_service.recurring_themes(user_id, days=7, min_mentions=1)
+    if not topics:
+        await telegram_service.send_message(chat_id, "No recurring topics yet. Send some audio first.")
+        return
+
+    lines = ["💡 <b>Recurring topics (7 days)</b>", ""]
+    for index, t in enumerate(topics[:8], start=1):
+        label = str(t.get("topic") or t.get("label") or "").strip()
+        mentions = int(t.get("mentions") or 0)
+        if not label:
+            continue
+        label_esc = label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        lines.append(f"{index}. {label_esc} — mentioned {mentions}×")
+    await telegram_service.send_message(chat_id, "\n".join(lines))
+
+
+async def _send_people(chat_id: int) -> None:
+    user_id = _chat_user_id(chat_id)
+    try:
+        topic_analysis_service.refresh_topic_window(user_id, days=7)
+    except Exception:
+        logger.exception("[Telegram] refresh_topic_window failed for chat %s", chat_id)
+
+    people = topic_analysis_service.latest_people(user_id, limit=8)
+    if not people:
+        await telegram_service.send_message(chat_id, "No people detected yet. Send some audio first.")
+        return
+
+    lines = ["👥 <b>Important people (7 days)</b>", ""]
+    for index, p in enumerate(people, start=1):
+        name = str(p.get("person") or p.get("name") or "").strip()
+        mentions = int(p.get("mentions") or 0)
+        if not name:
+            continue
+        name_esc = name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        lines.append(f"{index}. {name_esc} — mentioned {mentions}×")
+    await telegram_service.send_message(chat_id, "\n".join(lines))
+
+
+async def _handle_timezone(chat_id: int, text: str) -> None:
+    parts = text.split(maxsplit=1)
+    if len(parts) < 2:
+        prefs = digest_service.get_chat_prefs(chat_id) or {}
+        current = prefs.get("timezone") or "UTC"
+        await telegram_service.send_message(
+            chat_id,
+            f"Current timezone: <b>{current}</b>\n\n"
+            "Set with: <code>/timezone Asia/Kolkata</code>",
+        )
+        return
+    tz_name = parts[1].strip()
+    if digest_service.set_timezone(chat_id, tz_name):
+        await telegram_service.send_message(chat_id, f"✅ Timezone set to <b>{tz_name}</b>.")
+    else:
+        await telegram_service.send_message(
+            chat_id,
+            "Invalid timezone. Example: <code>/timezone Asia/Kolkata</code>",
+        )
 
 
 # ---------------------------------------------------------------------------

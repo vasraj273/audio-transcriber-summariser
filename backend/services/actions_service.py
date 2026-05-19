@@ -430,3 +430,65 @@ def _update_action_status(action_id: str, new_status: str) -> bool:
         logger.warning("[Actions] update %s -> %s failed: %s", action_id, new_status, exc)
         return False
     return bool(response.data)
+
+
+# ---------------------------------------------------------------------------
+# Urgent flag
+# ---------------------------------------------------------------------------
+
+_URGENT_KEYWORDS = (
+    "today", "tomorrow", "tonight", "urgent", "urgently", "asap",
+    "immediately", "right now", "deadline", "due now", "by end of day",
+    "eod", "by tomorrow",
+)
+
+
+def _text_is_urgent(text: str) -> bool:
+    if not text:
+        return False
+    lowered = str(text).lower()
+    return any(kw in lowered for kw in _URGENT_KEYWORDS)
+
+
+def mark_urgent_for_transcript(transcript_id: str, transcript_text: str = "") -> int:
+    """Scan a transcript's action_items rows; flip priority='urgent' on any
+    item whose title or description matches an urgency keyword. If
+    `transcript_text` itself contains an urgency keyword, ALL pending items
+    for that transcript are marked urgent (matches the spec literally).
+
+    Returns the number of rows updated. Fail-soft on table missing."""
+    try:
+        rows = (
+            _client.table("action_items")
+            .select("id, title, description")
+            .eq("transcript_id", transcript_id)
+            .execute()
+            .data
+            or []
+        )
+    except Exception as exc:
+        _warn_table_missing(exc)
+        return 0
+
+    transcript_urgent = _text_is_urgent(transcript_text)
+    to_update: list[str] = []
+    for row in rows:
+        if transcript_urgent or _text_is_urgent(
+            f"{row.get('title') or ''} {row.get('description') or ''}"
+        ):
+            to_update.append(row["id"])
+
+    if not to_update:
+        return 0
+
+    updated = 0
+    for action_id in to_update:
+        try:
+            _client.table("action_items").update({"priority": "urgent"}).eq(
+                "id", action_id
+            ).execute()
+            updated += 1
+        except Exception as exc:
+            _warn_table_missing(exc)
+            logger.warning("[Actions] urgent flag failed for %s: %s", action_id, exc)
+    return updated
