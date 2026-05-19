@@ -397,17 +397,27 @@ def get_cached_digest(user_id: str, digest_date: date) -> Optional[dict]:
 # Scheduling
 # ---------------------------------------------------------------------------
 
+_DIGEST_WINDOW_MINUTES = 7  # cron runs every ~15 min, so ±7 catches every slot once
+
+
 def should_send_now(prefs_row: dict, now_utc: datetime) -> bool:
-    """True when, in the user's TZ, the current hour matches `digest_hour`
-    AND we haven't already sent a digest today (per user's local date)."""
+    """True when, in the user's TZ, the current minute is within
+    ±_DIGEST_WINDOW_MINUTES of (digest_hour:digest_minute), AND we haven't
+    already sent a digest today (per user's local date)."""
     if not prefs_row or not prefs_row.get("digest_enabled", True):
         return False
 
     tzinfo = _resolve_tz(prefs_row.get("timezone") or "UTC")
     now_local = now_utc.astimezone(tzinfo)
     target_hour = int(prefs_row.get("digest_hour") or 20)
+    target_minute = int(prefs_row.get("digest_minute") or 0)
 
-    if now_local.hour != target_hour:
+    # Compare on absolute minutes-of-day so the window wraps cleanly around hours.
+    now_mod = now_local.hour * 60 + now_local.minute
+    target_mod = target_hour * 60 + target_minute
+    delta = abs(now_mod - target_mod)
+    delta = min(delta, 1440 - delta)  # handle wrap (e.g. 23:55 vs 00:05)
+    if delta > _DIGEST_WINDOW_MINUTES:
         return False
 
     last_sent = prefs_row.get("last_digest_sent_at")
@@ -424,6 +434,88 @@ def should_send_now(prefs_row: dict, now_utc: datetime) -> bool:
 
     last_local_date = last_dt.astimezone(tzinfo).date()
     return last_local_date != now_local.date()
+
+
+# ---------------------------------------------------------------------------
+# Time parsing + setters
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+
+def parse_digest_time(raw: str) -> Optional[tuple[int, int]]:
+    """Parse '20:00', '8pm', '8:30pm', '08:30', '8 pm', '8:30 AM', '0830'.
+    Returns (hour, minute) in 24h, or None if unparseable."""
+    if not raw:
+        return None
+    s = raw.strip().lower().replace(" ", "")
+
+    # 8pm / 8:30pm / 8am
+    m = _re.fullmatch(r"(\d{1,2})(?::(\d{2}))?(am|pm)", s)
+    if m:
+        hour = int(m.group(1))
+        minute = int(m.group(2) or 0)
+        suffix = m.group(3)
+        if hour < 1 or hour > 12 or minute > 59:
+            return None
+        if suffix == "am":
+            hour = 0 if hour == 12 else hour
+        else:  # pm
+            hour = 12 if hour == 12 else hour + 12
+        return hour, minute
+
+    # 24h: 20:00, 8:30, 0:05
+    m = _re.fullmatch(r"(\d{1,2}):(\d{2})", s)
+    if m:
+        hour = int(m.group(1))
+        minute = int(m.group(2))
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            return hour, minute
+        return None
+
+    # Compact: 2000, 0830
+    m = _re.fullmatch(r"(\d{3,4})", s)
+    if m:
+        digits = m.group(1).zfill(4)
+        hour = int(digits[:2])
+        minute = int(digits[2:])
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            return hour, minute
+        return None
+
+    # Bare hour: 20, 8
+    m = _re.fullmatch(r"(\d{1,2})", s)
+    if m:
+        hour = int(m.group(1))
+        if 0 <= hour <= 23:
+            return hour, 0
+
+    return None
+
+
+def format_digest_time(hour: int, minute: int) -> str:
+    """Render '8:00 PM' style."""
+    suffix = "AM" if hour < 12 else "PM"
+    h12 = hour % 12 or 12
+    return f"{h12}:{minute:02d} {suffix}"
+
+
+def set_digest_time(chat_id: int, hour: int, minute: int) -> bool:
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return False
+    try:
+        _client.table("telegram_chat_prefs").update(
+            {
+                "digest_hour": hour,
+                "digest_minute": minute,
+                "digest_enabled": True,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        ).eq("chat_id", chat_id).execute()
+        return True
+    except Exception as exc:
+        _warn_prefs_missing(exc)
+        return False
 
 
 # ---------------------------------------------------------------------------

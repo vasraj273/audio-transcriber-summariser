@@ -156,14 +156,16 @@ async def _dispatch_update(update: dict) -> None:
         return
 
     if text.startswith("/digest"):
-        # /digest_on and /digest_off handled here too.
+        # /digest_on, /digest_off, /digest_time handled here too.
         if text.startswith("/digest_on"):
-            digest_service.set_digest_enabled(chat_id, True)
-            await telegram_service.send_message(chat_id, "✅ Daily digest enabled.")
+            await _handle_digest_on(chat_id, text)
             return
         if text.startswith("/digest_off"):
             digest_service.set_digest_enabled(chat_id, False)
             await telegram_service.send_message(chat_id, "🔕 Daily digest disabled.")
+            return
+        if text.startswith("/digest_time"):
+            await _handle_digest_time(chat_id, text)
             return
         await _send_digest(chat_id)
         return
@@ -996,6 +998,14 @@ async def _send_stats(chat_id: int) -> None:
     except Exception:
         pass
 
+    digest_hour = int(prefs.get("digest_hour") or 20)
+    digest_minute = int(prefs.get("digest_minute") or 0)
+    digest_enabled = bool(prefs.get("digest_enabled", True))
+    pretty_time = digest_service.format_digest_time(digest_hour, digest_minute)
+    state_str = (
+        f"{pretty_time} {tz_name}" if digest_enabled else f"OFF (last set: {pretty_time} {tz_name})"
+    )
+
     body = (
         "📊 <b>Today's stats</b>\n\n"
         f"<b>Productivity score:</b> {score}/100\n"
@@ -1003,7 +1013,8 @@ async def _send_stats(chat_id: int) -> None:
         f"<b>Tasks done:</b> {done}\n"
         f"<b>Tasks pending:</b> {pending}\n"
         f"<b>Recordings:</b> {recordings}\n"
-        f"<b>Audio processed:</b> {duration_str}"
+        f"<b>Audio processed:</b> {duration_str}\n\n"
+        f"🕐 <b>Daily digest:</b> {state_str}"
     )
     await telegram_service.send_message(chat_id, body)
 
@@ -1053,6 +1064,66 @@ async def _send_people(chat_id: int) -> None:
         name_esc = name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         lines.append(f"{index}. {name_esc} — mentioned {mentions}×")
     await telegram_service.send_message(chat_id, "\n".join(lines))
+
+
+async def _handle_digest_on(chat_id: int, text: str) -> None:
+    """`/digest_on` (no arg) → enable at existing hour.
+    `/digest_on 20:00` / `8pm` / `8:30pm` → set time AND enable."""
+    parts = text.split(maxsplit=1)
+    if len(parts) < 2:
+        digest_service.set_digest_enabled(chat_id, True)
+        await _reply_current_digest_setting(chat_id, "✅ Daily digest enabled")
+        return
+
+    parsed = digest_service.parse_digest_time(parts[1])
+    if not parsed:
+        await telegram_service.send_message(
+            chat_id,
+            "Couldn't parse that time. Try <code>/digest_on 8pm</code>, <code>/digest_on 8:30pm</code>, or <code>/digest_on 20:00</code>.",
+        )
+        return
+
+    hour, minute = parsed
+    if not digest_service.set_digest_time(chat_id, hour, minute):
+        await telegram_service.send_message(chat_id, "Couldn't save digest time. Try again.")
+        return
+    await _reply_current_digest_setting(chat_id, "✅ Daily digest enabled")
+
+
+async def _handle_digest_time(chat_id: int, text: str) -> None:
+    """`/digest_time 21:15` — only set time, don't toggle enable state."""
+    parts = text.split(maxsplit=1)
+    if len(parts) < 2:
+        await _reply_current_digest_setting(chat_id, "🕐 Current digest setting")
+        return
+
+    parsed = digest_service.parse_digest_time(parts[1])
+    if not parsed:
+        await telegram_service.send_message(
+            chat_id,
+            "Couldn't parse that time. Try <code>/digest_time 21:15</code> or <code>/digest_time 9:15pm</code>.",
+        )
+        return
+
+    hour, minute = parsed
+    if not digest_service.set_digest_time(chat_id, hour, minute):
+        await telegram_service.send_message(chat_id, "Couldn't save digest time. Try again.")
+        return
+    await _reply_current_digest_setting(chat_id, "🕐 Digest time updated")
+
+
+async def _reply_current_digest_setting(chat_id: int, prefix: str) -> None:
+    prefs = digest_service.get_chat_prefs(chat_id) or {}
+    hour = int(prefs.get("digest_hour") or 20)
+    minute = int(prefs.get("digest_minute") or 0)
+    tz_name = prefs.get("timezone") or "UTC"
+    enabled = bool(prefs.get("digest_enabled", True))
+    pretty = digest_service.format_digest_time(hour, minute)
+    state = "" if enabled else " (currently OFF — /digest_on to enable)"
+    await telegram_service.send_message(
+        chat_id,
+        f"{prefix} for <b>{pretty}</b> {tz_name}{state}",
+    )
 
 
 async def _handle_timezone(chat_id: int, text: str) -> None:
