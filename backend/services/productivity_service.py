@@ -19,16 +19,21 @@ from services.supabase_service import _client  # type: ignore[attr-defined]
 logger = logging.getLogger(__name__)
 
 
+_NON_WORK_AUDIO_TYPES = {"music_song", "empty_audio"}
+
+
 def _zero_score() -> dict[str, Any]:
     return {
         "recordings": 0,
+        "work_recordings": 0,
         "total_seconds": 0.0,
         "tasks_total": 0,
         "tasks_done": 0,
         "tasks_pending": 0,
         "tasks_dismissed": 0,
-        "completion_pct": 0,
-        "score": 0,
+        "completion_pct": None,
+        "score": None,
+        "insufficient_data": True,
     }
 
 
@@ -45,11 +50,12 @@ def compute_score(user_id: str, since: datetime, until: datetime) -> dict[str, A
     until_iso = until.isoformat()
 
     recordings = 0
+    work_recordings = 0
     total_seconds = 0.0
     try:
         rows = (
             _client.table("transcripts")
-            .select("id, duration_seconds, status, created_at")
+            .select("id, duration_seconds, status, created_at, audio_type")
             .eq("user_id", user_id)
             .eq("status", "completed")
             .gte("created_at", since_iso)
@@ -60,6 +66,10 @@ def compute_score(user_id: str, since: datetime, until: datetime) -> dict[str, A
         )
         recordings = len(rows)
         total_seconds = sum(float(r.get("duration_seconds") or 0) for r in rows)
+        work_recordings = sum(
+            1 for r in rows
+            if (r.get("audio_type") or "").lower() not in _NON_WORK_AUDIO_TYPES
+        )
     except Exception as exc:
         logger.warning("[Productivity] transcripts read failed: %s", exc)
 
@@ -87,11 +97,23 @@ def compute_score(user_id: str, since: datetime, until: datetime) -> dict[str, A
         logger.warning("[Productivity] action_items read failed: %s", exc)
 
     tasks_total = tasks_done + tasks_pending + tasks_dismissed
-    completion_pct = round(100 * tasks_done / max(1, tasks_done + tasks_pending))
-    score = round(0.6 * completion_pct + 0.4 * min(100, recordings * 12))
+    insufficient_data = tasks_total == 0 and work_recordings == 0
+
+    if insufficient_data:
+        completion_pct: Any = None
+        score: Any = None
+    else:
+        denom = tasks_done + tasks_pending
+        completion_pct = round(100 * tasks_done / max(1, denom)) if denom > 0 else None
+        if completion_pct is None:
+            # Have work recordings but no actionable tasks yet — score from activity only.
+            score = round(min(100, work_recordings * 12))
+        else:
+            score = round(0.6 * completion_pct + 0.4 * min(100, work_recordings * 12))
 
     return {
         "recordings": recordings,
+        "work_recordings": work_recordings,
         "total_seconds": float(total_seconds),
         "tasks_total": tasks_total,
         "tasks_done": tasks_done,
@@ -99,6 +121,7 @@ def compute_score(user_id: str, since: datetime, until: datetime) -> dict[str, A
         "tasks_dismissed": tasks_dismissed,
         "completion_pct": completion_pct,
         "score": score,
+        "insufficient_data": insufficient_data,
     }
 
 

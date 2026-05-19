@@ -83,6 +83,14 @@ async def run_daily_digest_cron(
 
             if summary_text.strip():
                 await telegram_service.send_message(int(chat_id), summary_text)
+                # Interactive per-recording cards.
+                try:
+                    from routes.telegram import _send_digest_recording_cards
+                    recs = metadata.get("recordings_list") or []
+                    if recs:
+                        await _send_digest_recording_cards(int(chat_id), recs)
+                except Exception:
+                    logger.exception("[Cron] sending recording cards failed for %s", chat_id)
 
             digest_service.mark_digest_sent(int(chat_id), now_utc)
             sent += 1

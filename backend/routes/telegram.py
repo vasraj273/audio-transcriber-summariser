@@ -459,12 +459,25 @@ async def _handle_callback(callback: dict) -> None:
         return
 
     # Callback data scheme:
-    #   pdf:<id>        email:<id>        translate:<id>       ask:<id>   (legacy)
-    #   cal:<id>                                                          (calendar export)
-    #   action:done:<id>        action:dismiss:<id>                       (bulk task ops)
+    #   pdf:<id>        email:<id>        translate:<id>       ask:<id>
+    #   cal:<id>                                                         (calendar export)
+    #   action:done:<id>        action:dismiss:<id>                      (bulk task ops)
+    #   dsum:<id>       dpdf:<id>                                        (digest cards)
+    #   dtx:<id>:<page>                                                  (digest transcript pagination)
     parts = data.split(":")
     if len(parts) < 2:
         await telegram_service.answer_callback_query(callback_id, "Bad action.")
+        return
+
+    # Digest transcript pagination — needs special parse (3 parts).
+    if parts[0] == "dtx" and len(parts) >= 3:
+        await telegram_service.answer_callback_query(callback_id, "")
+        try:
+            page = int(parts[-1])
+        except ValueError:
+            page = 0
+        record_id = ":".join(parts[1:-1])
+        await _action_digest_transcript(chat_id, record_id, page, message_id, edit=True)
         return
 
     if parts[0] == "action":
@@ -512,6 +525,12 @@ async def _handle_callback(callback: dict) -> None:
         elif action == "action:dismiss":
             await telegram_service.answer_callback_query(callback_id, "Dismissing…")
             await _action_mark_all(chat_id, record_id, message_id, new_status="dismissed")
+        elif action == "dsum":
+            await telegram_service.answer_callback_query(callback_id, "")
+            await _action_digest_summary(chat_id, record_id)
+        elif action == "dpdf":
+            await telegram_service.answer_callback_query(callback_id, "Building PDF…")
+            await _action_pdf(chat_id, record_id)
         else:
             await telegram_service.answer_callback_query(callback_id, "Unknown action.")
     except Exception:
@@ -937,6 +956,10 @@ async def _send_digest(chat_id: int) -> None:
     cached = digest_service.get_cached_digest(user_id, date.today())
     if cached and cached.get("summary"):
         await telegram_service.send_message(chat_id, cached["summary"])
+        cached_meta = cached.get("metadata") or {}
+        recs = cached_meta.get("recordings_list") or []
+        if recs:
+            await _send_digest_recording_cards(chat_id, recs)
         return
 
     try:
@@ -967,6 +990,10 @@ async def _send_digest(chat_id: int) -> None:
 
     await telegram_service.send_message(chat_id, text)
 
+    recs = metadata.get("recordings_list") or []
+    if recs:
+        await _send_digest_recording_cards(chat_id, recs)
+
 
 async def _send_stats(chat_id: int) -> None:
     user_id = _chat_user_id(chat_id)
@@ -984,8 +1011,6 @@ async def _send_stats(chat_id: int) -> None:
 
     metadata = result.get("metadata") or {}
     prod = metadata.get("productivity") or {}
-    score = int(prod.get("score") or 0)
-    completion = int(prod.get("completion_pct") or 0)
     done = int(prod.get("tasks_done") or 0)
     pending = int(prod.get("tasks_pending") or 0)
     recordings = int(metadata.get("recordings") or 0)
@@ -1006,12 +1031,23 @@ async def _send_stats(chat_id: int) -> None:
         f"{pretty_time} {tz_name}" if digest_enabled else f"OFF (last set: {pretty_time} {tz_name})"
     )
 
+    if prod.get("insufficient_data"):
+        prod_block = "📊 <b>Productivity:</b> Not enough work-related data yet"
+    else:
+        score = prod.get("score")
+        completion = prod.get("completion_pct")
+        score_str = f"{int(score)}/100" if score is not None else "—"
+        completion_str = f"{int(completion)}%" if completion is not None else "N/A"
+        prod_block = (
+            f"<b>Productivity score:</b> {score_str}\n"
+            f"<b>Completion:</b> {completion_str}\n"
+            f"<b>Tasks done:</b> {done}\n"
+            f"<b>Tasks pending:</b> {pending}"
+        )
+
     body = (
         "📊 <b>Today's stats</b>\n\n"
-        f"<b>Productivity score:</b> {score}/100\n"
-        f"<b>Completion:</b> {completion}%\n"
-        f"<b>Tasks done:</b> {done}\n"
-        f"<b>Tasks pending:</b> {pending}\n"
+        f"{prod_block}\n\n"
         f"<b>Recordings:</b> {recordings}\n"
         f"<b>Audio processed:</b> {duration_str}\n\n"
         f"🕐 <b>Daily digest:</b> {state_str}"
@@ -1064,6 +1100,105 @@ async def _send_people(chat_id: int) -> None:
         name_esc = name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         lines.append(f"{index}. {name_esc} — mentioned {mentions}×")
     await telegram_service.send_message(chat_id, "\n".join(lines))
+
+
+_DIGEST_TX_PAGE_CHARS = 3500
+
+
+def _digest_card_buttons(record_id: str) -> list[list[dict]]:
+    return [
+        [
+            {"text": "📝 Summary", "callback_data": f"dsum:{record_id}"},
+            {"text": "📄 Transcript", "callback_data": f"dtx:{record_id}:0"},
+            {"text": "📑 PDF", "callback_data": f"dpdf:{record_id}"},
+        ]
+    ]
+
+
+async def _send_digest_recording_cards(chat_id: int, recordings_list: list[dict]) -> None:
+    """One small Telegram message per recording with [Summary][Transcript][PDF] buttons."""
+    if not recordings_list:
+        return
+    for r in recordings_list:
+        rec_id = (r.get("id") or "").strip()
+        if not rec_id:
+            continue
+        name = (r.get("audio_name") or "audio").replace("telegram:", "")
+        name_esc = name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        try:
+            from services.productivity_service import format_duration
+            dur = format_duration(r.get("duration_seconds") or 0)
+        except Exception:
+            dur = ""
+        suffix = f" <i>· {dur}</i>" if dur else ""
+        await telegram_service.send_message(
+            chat_id,
+            f"🎵 <b>{name_esc}</b>{suffix}",
+            buttons=_digest_card_buttons(rec_id),
+        )
+
+
+async def _action_digest_summary(chat_id: int, record_id: str) -> None:
+    record = _fetch_record_by_id(record_id)
+    if not record:
+        await telegram_service.send_message(chat_id, "That recording is no longer available.")
+        return
+    summary = (record.get("summary") or "").strip()
+    if not summary:
+        await telegram_service.send_message(chat_id, "No summary stored for this recording.")
+        return
+    # Stay safe under Telegram's 4096-char ceiling.
+    if len(summary) > 3800:
+        summary = summary[:3800].rstrip() + "…"
+    summary_esc = summary.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    await telegram_service.send_message(chat_id, f"📝 <b>Summary</b>\n\n{summary_esc}")
+
+
+async def _action_digest_transcript(
+    chat_id: int,
+    record_id: str,
+    page: int,
+    message_id: Optional[int],
+    edit: bool = False,
+) -> None:
+    record = _fetch_record_by_id(record_id)
+    if not record:
+        await telegram_service.send_message(chat_id, "That recording is no longer available.")
+        return
+
+    transcript = (record.get("transcript") or "").strip()
+    if not transcript:
+        await telegram_service.send_message(chat_id, "No transcript stored for this recording.")
+        return
+
+    total_pages = max(1, (len(transcript) + _DIGEST_TX_PAGE_CHARS - 1) // _DIGEST_TX_PAGE_CHARS)
+    page = max(0, min(page, total_pages - 1))
+    start = page * _DIGEST_TX_PAGE_CHARS
+    chunk = transcript[start : start + _DIGEST_TX_PAGE_CHARS]
+    chunk_esc = chunk.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    body = f"📄 <b>Transcript</b> — Part {page + 1}/{total_pages}\n\n{chunk_esc}"
+
+    nav_row: list[dict] = []
+    if page > 0:
+        nav_row.append({"text": "◀ Prev", "callback_data": f"dtx:{record_id}:{page - 1}"})
+    if page < total_pages - 1:
+        nav_row.append({"text": "Next ▶", "callback_data": f"dtx:{record_id}:{page + 1}"})
+    buttons = [nav_row] if nav_row else None
+
+    if edit and message_id is not None:
+        try:
+            await telegram_service.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=body,
+                buttons=buttons,
+            )
+            return
+        except Exception:
+            logger.exception("[Telegram] edit transcript page failed; sending new message instead")
+
+    await telegram_service.send_message(chat_id, body, buttons=buttons)
 
 
 async def _handle_digest_on(chat_id: int, text: str) -> None:

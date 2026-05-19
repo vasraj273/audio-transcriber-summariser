@@ -180,6 +180,14 @@ def build_today_digest(user_id: str, chat_id: int, tz_name: str = "UTC") -> dict
     metadata = {
         "date": today_local.isoformat(),
         "recordings": len(recordings),
+        "recordings_list": [
+            {
+                "id": str(r.get("id") or ""),
+                "audio_name": (r.get("audio_name") or "").strip() or "audio",
+                "duration_seconds": float(r.get("duration_seconds") or 0),
+            }
+            for r in recordings
+        ],
         "total_seconds": total_seconds,
         "topics": topics_top,
         "people": people_top,
@@ -245,33 +253,36 @@ def _render_digest_html(
     lines.append(f"🧭 <b>Daily Digest — {today_local.isoformat()}</b>")
     lines.append("")
 
-    # Recordings
+    # Recordings (count + total; per-recording cards are sent separately by _send_digest)
     if recordings:
         total_str = productivity_service.format_duration(productivity.get("total_seconds") or 0)
         lines.append(
             f"🎙 <b>Today's recordings:</b> {len(recordings)} • {_html_escape(total_str)}"
         )
-        for r in recordings[:5]:
-            name = _html_escape((r.get("audio_name") or "audio").replace("telegram:", ""))
-            dur = productivity_service.format_duration(r.get("duration_seconds") or 0)
-            lines.append(f"  • {_truncate(name, 60)} <i>({_html_escape(dur)})</i>")
-        if len(recordings) > 5:
-            lines.append(f"  • <i>…and {len(recordings) - 5} more</i>")
+        lines.append("<i>Interactive cards follow below ↓</i>")
         lines.append("")
     else:
         lines.append("🎙 <b>Today's recordings:</b> none")
         lines.append("")
 
-    # Productivity
-    score = int(productivity.get("score") or 0)
-    completion = int(productivity.get("completion_pct") or 0)
-    lines.append(
-        f"📊 <b>Productivity:</b> {score}/100 — "
-        f"{productivity.get('tasks_done', 0)} done, "
-        f"{productivity.get('tasks_pending', 0)} pending "
-        f"({completion}% completion)"
-    )
-    lines.append("")
+    # Productivity — hide score/completion when there's no real work signal.
+    if productivity.get("insufficient_data"):
+        lines.append("📊 <b>Productivity:</b> Not enough work-related data yet")
+        lines.append("")
+    else:
+        score = productivity.get("score")
+        completion = productivity.get("completion_pct")
+        score_part = f"{int(score)}/100" if score is not None else "—"
+        completion_part = (
+            f" ({int(completion)}% completion)" if completion is not None else ""
+        )
+        lines.append(
+            f"📊 <b>Productivity:</b> {score_part} — "
+            f"{productivity.get('tasks_done', 0)} done, "
+            f"{productivity.get('tasks_pending', 0)} pending"
+            f"{completion_part}"
+        )
+        lines.append("")
 
     # Pending tasks (top 5)
     if pending_top:
