@@ -269,6 +269,253 @@ def result_action_buttons(record_id: str) -> list[list[dict]]:
     ]
 
 
+def result_action_buttons_with_actions(record_id: str) -> list[list[dict]]:
+    """Extended inline keyboard for the AI-Actions enriched result message.
+
+    Layout (per spec):
+        [ ✅ Done ]      [ 📅 Calendar ]
+        [ 📧 Email ]     [ 🌐 Translate ]
+        [ 💬 Ask  ]      [ ❌ Dismiss ]
+
+    PDF is intentionally dropped from this keyboard to keep it at 3 rows of 2
+    buttons (Telegram inline buttons get cramped beyond that). Users can still
+    type /tasks etc. for text-only views; PDF callback remains supported in
+    case some older message still has the old keyboard rendered.
+    """
+    if not record_id:
+        return []
+    return [
+        [
+            {"text": "✅ Done", "callback_data": f"action:done:{record_id}"},
+            {"text": "📅 Calendar", "callback_data": f"cal:{record_id}"},
+        ],
+        [
+            {"text": "📧 Email", "callback_data": f"email:{record_id}"},
+            {"text": "🌐 Translate", "callback_data": f"translate:{record_id}"},
+        ],
+        [
+            {"text": "💬 Ask", "callback_data": f"ask:{record_id}"},
+            {"text": "❌ Dismiss", "callback_data": f"action:dismiss:{record_id}"},
+        ],
+    ]
+
+
+def format_actions_reply(transcript_row: dict, extracted: dict | None) -> str:
+    """Build the Telegram reply that includes Action Items + Detected sections.
+
+    Falls back to the existing Action Items block (built from key_points) when
+    extraction produced no tasks. Detected People / Dates / Deadlines / Events
+    sections are only rendered when they have content."""
+    summary = (transcript_row.get("summary") or "").strip()
+    if len(summary) > _SUMMARY_PREVIEW_CHARS:
+        summary = summary[:_SUMMARY_PREVIEW_CHARS].rstrip() + "..."
+
+    extracted = extracted or {}
+    tasks = extracted.get("tasks") or []
+    people = extracted.get("people") or []
+    dates = extracted.get("dates") or []
+    deadlines = extracted.get("deadlines") or []
+    events = extracted.get("events") or []
+
+    # Action Items source: prefer extracted tasks, fall back to key_points.
+    if tasks:
+        action_bullets = []
+        for task in tasks:
+            title = _html_escape(str(task.get("title") or "").strip())
+            if not title:
+                continue
+            extras = []
+            person = (task.get("person") or "").strip()
+            if person:
+                extras.append(_html_escape(person))
+            due_date = (task.get("due_date") or "").strip()
+            due_time = (task.get("due_time") or "").strip()
+            if due_date and due_time:
+                extras.append(_html_escape(f"{due_date} {due_time}"))
+            elif due_date:
+                extras.append(_html_escape(due_date))
+            suffix = f" <i>({', '.join(extras)})</i>" if extras else ""
+            action_bullets.append(f"• {title}{suffix}")
+        action_block = "\n".join(action_bullets) or "• (none extracted)"
+    else:
+        key_points = transcript_row.get("key_points") or []
+        fallback = "\n".join(
+            f"• {_html_escape(str(point).strip())}"
+            for point in key_points if str(point).strip()
+        )
+        action_block = fallback or "• (none extracted)"
+
+    language = (transcript_row.get("detected_language") or "unknown").strip() or "unknown"
+    duration = _format_duration(transcript_row.get("duration_seconds") or 0)
+    warning = (transcript_row.get("warning") or "").strip()
+    warning_block = f"\n\n⚠️ {_html_escape(warning)}" if warning else ""
+
+    detected_blocks: list[str] = []
+    if people:
+        detected_blocks.append(
+            "👥 <b>Detected People:</b>\n"
+            + ", ".join(_html_escape(p) for p in people)
+        )
+    if dates:
+        detected_blocks.append(
+            "📅 <b>Detected Dates:</b>\n"
+            + ", ".join(_html_escape(d) for d in dates)
+        )
+    if deadlines:
+        deadline_lines = []
+        for item in deadlines:
+            what = _html_escape((item.get("what") or "").strip())
+            when = _html_escape((item.get("when") or "").strip())
+            if what and when:
+                deadline_lines.append(f"• {what} — {when}")
+            elif what:
+                deadline_lines.append(f"• {what}")
+            elif when:
+                deadline_lines.append(f"• {when}")
+        if deadline_lines:
+            detected_blocks.append("⏰ <b>Deadlines:</b>\n" + "\n".join(deadline_lines))
+    if events:
+        event_lines = []
+        for ev in events:
+            title = _html_escape((ev.get("title") or "").strip())
+            if not title:
+                continue
+            extras = []
+            dt = (ev.get("datetime") or "").strip()
+            loc = (ev.get("location") or "").strip()
+            if dt:
+                extras.append(_html_escape(dt))
+            if loc:
+                extras.append(_html_escape(loc))
+            suffix = f" <i>({', '.join(extras)})</i>" if extras else ""
+            event_lines.append(f"• {title}{suffix}")
+        if event_lines:
+            detected_blocks.append("📌 <b>Events:</b>\n" + "\n".join(event_lines))
+
+    detected_section = ("\n\n" + "\n\n".join(detected_blocks)) if detected_blocks else ""
+
+    return (
+        "📝 <b>Summary:</b>\n"
+        f"{_html_escape(summary) or '(no summary)'}\n\n"
+        "✅ <b>Action Items:</b>\n"
+        f"{action_block}"
+        f"{detected_section}"
+        f"\n\n🌐 <b>Language:</b> {_html_escape(language)}"
+        f"\n⏱ <b>Duration:</b> {duration}"
+        f"{warning_block}"
+    )
+
+
+def build_ics(record_audio_name: str, items: list[dict]) -> bytes:
+    """Build a minimal RFC 5545 .ics calendar containing one VEVENT per dated
+    action item. Uses stdlib only — no icalendar dependency. Items without a
+    `due_date` are skipped by the caller; this helper assumes the items it
+    receives are already filtered."""
+    from datetime import date as _date, datetime as _dt
+
+    def _fold_line(line: str) -> str:
+        # RFC 5545 lines should be folded at 75 octets. We keep it simple and
+        # only fold if the line is unusually long.
+        if len(line) <= 73:
+            return line
+        chunks = []
+        i = 0
+        while i < len(line):
+            chunks.append(line[i:i + 73])
+            i += 73
+        return "\r\n ".join(chunks)
+
+    def _esc(text: str) -> str:
+        return (
+            (text or "")
+            .replace("\\", "\\\\")
+            .replace(";", "\\;")
+            .replace(",", "\\,")
+            .replace("\n", "\\n")
+        )
+
+    now_stamp = _dt.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    audio_label = (record_audio_name or "transcript").replace("telegram:", "")
+
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Audio Transcriber Summariser//Telegram Bot//EN",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+    ]
+
+    for index, item in enumerate(items):
+        due_date = item.get("due_date")
+        if not due_date:
+            continue
+        if isinstance(due_date, _date) and not isinstance(due_date, _dt):
+            d_iso = due_date.isoformat()
+        else:
+            d_iso = str(due_date)
+        try:
+            d_obj = _dt.strptime(d_iso, "%Y-%m-%d").date()
+        except Exception:
+            continue
+
+        due_time = item.get("due_time")
+        if due_time:
+            t_str = str(due_time)
+            try:
+                hh, mm = t_str.split(":")[:2]
+                hh, mm = int(hh), int(mm)
+                dt_start = _dt(d_obj.year, d_obj.month, d_obj.day, hh, mm, 0)
+                dtstart = f"DTSTART:{dt_start.strftime('%Y%m%dT%H%M%S')}"
+                dt_end = _dt(d_obj.year, d_obj.month, d_obj.day, hh, mm, 0)
+                # +1 hour default duration
+                dt_end_str = dt_end.replace(hour=(hh + 1) % 24).strftime('%Y%m%dT%H%M%S')
+                dtend = f"DTEND:{dt_end_str}"
+            except Exception:
+                dtstart = f"DTSTART;VALUE=DATE:{d_obj.strftime('%Y%m%d')}"
+                dtend = f"DTEND;VALUE=DATE:{d_obj.strftime('%Y%m%d')}"
+        else:
+            dtstart = f"DTSTART;VALUE=DATE:{d_obj.strftime('%Y%m%d')}"
+            dtend = f"DTEND;VALUE=DATE:{d_obj.strftime('%Y%m%d')}"
+
+        uid_source = str(item.get("id") or f"{audio_label}-{index}")
+        summary_text = _esc(str(item.get("title") or "Task"))
+        desc_parts = []
+        if item.get("description"):
+            desc_parts.append(str(item.get("description")))
+        if item.get("person"):
+            desc_parts.append(f"Assignee: {item.get('person')}")
+        desc_parts.append(f"From audio: {audio_label}")
+        description_text = _esc(" | ".join(desc_parts))
+
+        lines.extend([
+            "BEGIN:VEVENT",
+            _fold_line(f"UID:{uid_source}@audio-transcriber-summariser"),
+            f"DTSTAMP:{now_stamp}",
+            _fold_line(dtstart),
+            _fold_line(dtend),
+            _fold_line(f"SUMMARY:{summary_text}"),
+            _fold_line(f"DESCRIPTION:{description_text}"),
+            "END:VEVENT",
+        ])
+
+    lines.append("END:VCALENDAR")
+    return ("\r\n".join(lines) + "\r\n").encode("utf-8")
+
+
+def help_text() -> str:
+    return (
+        "<b>Commands:</b>\n"
+        "/start — show welcome\n"
+        "/tasks or /pending — list pending action items\n"
+        "/completed — list completed action items\n"
+        "/exit — leave ask / email mode\n"
+        "/help — this message\n\n"
+        "<b>Tips:</b>\n"
+        "• Send any audio, voice note, or video — I'll transcribe, summarise, and extract tasks.\n"
+        "• Use the inline buttons to mark Done, export to Calendar (.ics), Email, Translate, Ask, or Dismiss.\n"
+    )
+
+
 def welcome_text() -> str:
     return (
         "👋 Send me audio and I'll transcribe + summarize.\n\n"

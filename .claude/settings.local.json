@@ -20,7 +20,10 @@
       "Bash(\"./venv/Scripts/python.exe\" -c \"from routes import telegram; print\\('telegram router loaded OK, prefix:', telegram.router.prefix\\); print\\('routes:', [r.path for r in telegram.router.routes]\\)\")",
       "Bash(\"./venv/Scripts/python.exe\" -c \"import main; print\\('main OK; routes total:', len\\(main.app.routes\\)\\)\")",
       "Bash(python -m compileall backend/main.py backend/routes backend/services)",
-      "Bash(python -m compileall backend/routes/telegram.py)"
+      "Bash(python -m compileall backend/routes/telegram.py)",
+      "Bash(python -m compileall backend)",
+      "Bash(python -m compileall -q backend/main.py backend/models backend/routes backend/services)",
+      "Bash(grep -iE \"error|fail|syntax|\\\\\\\\*\\\\\\\\*\\\\\\\\*\")"
     ]
   }
 }

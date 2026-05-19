@@ -37,7 +37,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
 
 from routes.process import process_audio_file
-from services import telegram_service
+from services import actions_service, telegram_service
 from services.analytics_service import record_transcript_event
 from services.groq_service import chat_with_audio, summarise_transcript
 from services.supabase_service import (
@@ -133,6 +133,18 @@ async def _dispatch_update(update: dict) -> None:
         _ASK_MODE.pop(chat_id, None)
         _AWAITING_EMAIL.pop(chat_id, None)
         await telegram_service.send_message(chat_id, telegram_service.welcome_text())
+        return
+
+    if text.startswith("/help"):
+        await telegram_service.send_message(chat_id, telegram_service.help_text())
+        return
+
+    if text.startswith("/tasks") or text.startswith("/pending"):
+        await _send_action_list(chat_id, status="pending", header="📝 <b>Pending tasks</b>")
+        return
+
+    if text.startswith("/completed"):
+        await _send_action_list(chat_id, status="done", header="✅ <b>Completed tasks</b>")
         return
 
     if text.startswith("/exit") or text.startswith("/cancel") or text.startswith("/stop"):
@@ -304,11 +316,34 @@ async def _handle_audio_message(chat_id: int, message: dict, media: dict) -> Non
         complete_transcript(job_id, result)
         _emit_event(record_id, job_id, user_id, result, "completed", None)
 
-        reply_text = telegram_service.format_result_reply(result)
+        # SECOND LLM pass: extract structured tasks / people / dates / etc.
+        # Failure here is non-fatal — we still send the summary.
+        extracted = None
+        try:
+            extracted = actions_service.extract_actions(
+                transcript=result.get("transcript") or "",
+                summary=result.get("summary") or "",
+                language=result.get("detected_language"),
+            )
+            if extracted and record_id:
+                try:
+                    actions_service.save_action_items(user_id, record_id, extracted)
+                except Exception:
+                    logger.exception("[Telegram] save_action_items failed for record %s", record_id)
+        except Exception:
+            logger.exception("[Telegram] extract_actions failed for record %s", record_id)
+            extracted = None
+
+        if extracted:
+            reply_text = telegram_service.format_actions_reply(result, extracted)
+        else:
+            # Degrade gracefully to the old summary-only reply.
+            reply_text = telegram_service.format_result_reply(result)
+
         await telegram_service.send_message(
             chat_id,
             reply_text,
-            buttons=telegram_service.result_action_buttons(record_id),
+            buttons=telegram_service.result_action_buttons_with_actions(record_id),
             reply_to_message_id=message_id,
         )
     except Exception as exc:
@@ -378,11 +413,24 @@ async def _handle_callback(callback: dict) -> None:
         await telegram_service.answer_callback_query(callback_id, "")
         return
 
-    try:
-        action, _, record_id = data.partition(":")
-    except Exception:
+    # Callback data scheme:
+    #   pdf:<id>        email:<id>        translate:<id>       ask:<id>   (legacy)
+    #   cal:<id>                                                          (calendar export)
+    #   action:done:<id>        action:dismiss:<id>                       (bulk task ops)
+    parts = data.split(":")
+    if len(parts) < 2:
         await telegram_service.answer_callback_query(callback_id, "Bad action.")
         return
+
+    if parts[0] == "action":
+        if len(parts) < 3:
+            await telegram_service.answer_callback_query(callback_id, "Bad action.")
+            return
+        action = f"action:{parts[1]}"
+        record_id = ":".join(parts[2:])
+    else:
+        action = parts[0]
+        record_id = ":".join(parts[1:])
 
     if not record_id:
         await telegram_service.answer_callback_query(callback_id, "Missing record.")
@@ -410,6 +458,15 @@ async def _handle_callback(callback: dict) -> None:
                 "💬 Ask mode is on. Send a question and I'll answer using this audio. "
                 "Send /exit to leave ask mode.",
             )
+        elif action == "cal":
+            await telegram_service.answer_callback_query(callback_id, "Building calendar…")
+            await _action_calendar(chat_id, record_id)
+        elif action == "action:done":
+            await telegram_service.answer_callback_query(callback_id, "Marking done…")
+            await _action_mark_all(chat_id, record_id, message_id, new_status="done")
+        elif action == "action:dismiss":
+            await telegram_service.answer_callback_query(callback_id, "Dismissing…")
+            await _action_mark_all(chat_id, record_id, message_id, new_status="dismissed")
         else:
             await telegram_service.answer_callback_query(callback_id, "Unknown action.")
     except Exception:
@@ -729,6 +786,98 @@ async def _handle_ask_reply(chat_id: int, record_id: str, question: str) -> None
         return
 
     await telegram_service.send_message(chat_id, answer or "(no answer)")
+
+
+# ---------------------------------------------------------------------------
+# Action: Calendar export (.ics)
+# ---------------------------------------------------------------------------
+
+async def _action_calendar(chat_id: int, record_id: str) -> None:
+    items = actions_service.list_action_items_for_transcript(record_id)
+    dated_items = [item for item in items if item.get("due_date")]
+    if not dated_items:
+        await telegram_service.send_message(chat_id, "No dated tasks to add to calendar.")
+        return
+
+    record = _fetch_record_by_id(record_id)
+    audio_name = (record.get("audio_name") if record else None) or "transcript"
+
+    try:
+        ics_bytes = telegram_service.build_ics(audio_name, dated_items)
+    except Exception:
+        logger.exception("[Telegram] build_ics failed for record %s", record_id)
+        await telegram_service.send_message(chat_id, "Couldn't build the calendar file. Try again later.")
+        return
+
+    safe_base = audio_name.replace("telegram:", "")
+    safe_base = "".join(ch if ch.isalnum() or ch in "._- " else "_" for ch in safe_base).strip() or "tasks"
+    await telegram_service.send_document(
+        chat_id,
+        ics_bytes,
+        f"{safe_base}.ics",
+        caption=f"📅 {len(dated_items)} dated task(s) — import into your calendar.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Action: bulk mark all action items for a transcript done / dismissed
+# ---------------------------------------------------------------------------
+
+async def _action_mark_all(
+    chat_id: int,
+    record_id: str,
+    message_id: Optional[int],
+    new_status: str,
+) -> None:
+    updated = actions_service.mark_transcript_actions_status(record_id, new_status)
+    if new_status == "done":
+        if updated:
+            footer = f"✅ All tasks marked done. ({updated})"
+        else:
+            footer = "✅ Tasks marked done."
+    else:
+        if updated:
+            footer = f"❌ Dismissed. ({updated})"
+        else:
+            footer = "❌ Dismissed."
+    await telegram_service.send_message(chat_id, footer)
+
+
+# ---------------------------------------------------------------------------
+# /tasks /pending /completed
+# ---------------------------------------------------------------------------
+
+async def _send_action_list(chat_id: int, status: str, header: str) -> None:
+    user_id = _chat_user_id(chat_id)
+    rows = actions_service.list_action_items(user_id, status=status, limit=25)
+    if not rows:
+        msg = "No pending tasks." if status == "pending" else "No completed tasks."
+        await telegram_service.send_message(chat_id, msg)
+        return
+
+    lines = [header]
+    for index, row in enumerate(rows, start=1):
+        title = str(row.get("title") or "").strip() or "(untitled)"
+        extras = []
+        person = (row.get("person") or "").strip()
+        if person:
+            extras.append(person)
+        due_date = (row.get("due_date") or "")
+        due_time = (row.get("due_time") or "")
+        if due_date and due_time:
+            extras.append(f"{due_date} {due_time}")
+        elif due_date:
+            extras.append(str(due_date))
+        suffix = f" — {', '.join(extras)}" if extras else ""
+        # _html_escape lives in telegram_service; we re-import via the module path.
+        title_esc = (
+            title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        )
+        suffix_esc = (
+            suffix.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        )
+        lines.append(f"{index}. {title_esc}{suffix_esc}")
+    await telegram_service.send_message(chat_id, "\n".join(lines))
 
 
 # ---------------------------------------------------------------------------
