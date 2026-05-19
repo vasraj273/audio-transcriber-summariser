@@ -26,6 +26,8 @@ import logging
 import os
 import smtplib
 import tempfile
+
+import httpx
 import time
 import traceback
 import uuid
@@ -546,14 +548,14 @@ async def _handle_email_reply(chat_id: int, record_id: str, raw_email: str) -> N
         await telegram_service.send_message(chat_id, "Couldn't find that transcript anymore.")
         return
 
-    if not _smtp_configured():
+    if not _email_configured():
         await telegram_service.send_message(chat_id, "Email not configured.")
         return
 
     try:
-        _send_summary_email(raw_email.strip(), record)
+        await _send_summary_email(raw_email.strip(), record)
     except Exception:
-        logger.exception("[Telegram] SMTP send failed")
+        logger.exception("[Telegram] Email send failed")
         await telegram_service.send_message(
             chat_id,
             "Couldn't send the email. Please try again later or use the PDF button.",
@@ -563,14 +565,20 @@ async def _handle_email_reply(chat_id: int, record_id: str, raw_email: str) -> N
     await telegram_service.send_message(chat_id, f"📧 Sent to {raw_email.strip()}.")
 
 
-def _smtp_configured() -> bool:
+def _email_configured() -> bool:
+    if os.getenv("RESEND_API_KEY") and os.getenv("EMAIL_FROM"):
+        return True
     return all(
         os.getenv(name)
         for name in ("SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM")
     )
 
 
-def _send_summary_email(to_addr: str, record: dict) -> None:
+def _smtp_configured() -> bool:
+    return _email_configured()
+
+
+async def _send_summary_email(to_addr: str, record: dict) -> None:
     host = os.getenv("SMTP_HOST")
     port = int(os.getenv("SMTP_PORT") or 587)
     user = os.getenv("SMTP_USER")
@@ -599,6 +607,12 @@ def _send_summary_email(to_addr: str, record: dict) -> None:
     )
     msg.set_content(body)
 
+    # Prefer Resend HTTP API (works on Render free tier where SMTP is blocked).
+    resend_key = os.getenv("RESEND_API_KEY")
+    if resend_key:
+        await _send_via_resend(to_addr, msg["Subject"], body, resend_key)
+        return
+
     if use_ssl:
         with smtplib.SMTP_SSL(host, port, timeout=30) as smtp:
             smtp.login(user, password)
@@ -608,6 +622,29 @@ def _send_summary_email(to_addr: str, record: dict) -> None:
             smtp.starttls()
             smtp.login(user, password)
             smtp.send_message(msg)
+
+
+async def _send_via_resend(to_addr: str, subject: str, body: str, api_key: str) -> None:
+    sender = os.getenv("EMAIL_FROM") or os.getenv("SMTP_FROM")
+    if not sender:
+        raise RuntimeError("EMAIL_FROM (or SMTP_FROM) must be set for Resend")
+    payload = {
+        "from": sender,
+        "to": [to_addr],
+        "subject": subject,
+        "text": body,
+    }
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+        if resp.status_code >= 300:
+            raise RuntimeError(f"Resend API error {resp.status_code}: {resp.text}")
 
 
 # ---------------------------------------------------------------------------
