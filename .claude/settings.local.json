@@ -23,7 +23,8 @@
       "Bash(python -m compileall backend/routes/telegram.py)",
       "Bash(python -m compileall backend)",
       "Bash(python -m compileall -q backend/main.py backend/models backend/routes backend/services)",
-      "Bash(grep -iE \"error|fail|syntax|\\\\\\\\*\\\\\\\\*\\\\\\\\*\")"
+      "Bash(grep -iE \"error|fail|syntax|\\\\\\\\*\\\\\\\\*\\\\\\\\*\")",
+      "Bash(python -m compileall main.py routes services)"
     ]
   }
 }

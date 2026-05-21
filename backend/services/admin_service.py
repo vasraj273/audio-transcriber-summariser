@@ -170,6 +170,14 @@ def list_users(search: str = "", plan: str = "", status: str = "") -> list:
             rows = [r for r in rows if r["plan"] == plan]
         if status:
             rows = [r for r in rows if r["status"] == status]
+
+        # Sort by last_active_at desc, with nulls pushed to the bottom so the
+        # admin sees the freshest users at the top of the list.
+        def _sort_key(row):
+            parsed = _safe_parse(row.get("last_active_at"))
+            return (0 if parsed else 1, -(parsed.timestamp() if parsed else 0))
+
+        rows.sort(key=_sort_key)
         return rows
     except Exception as exc:
         logger.exception("list_users failed: %s", exc)

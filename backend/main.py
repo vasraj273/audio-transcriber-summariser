@@ -9,6 +9,7 @@ from routes.analysis import router as analysis_router
 from routes.admin import router as admin_router
 from routes.telegram import router as telegram_router
 from routes.cron import router as cron_router
+from routes.activity import router as activity_router
 
 app = FastAPI(title="Audio Transcriber and Summariser")
 
@@ -36,6 +37,7 @@ app.include_router(analysis_router)
 app.include_router(admin_router)
 app.include_router(telegram_router)
 app.include_router(cron_router)
+app.include_router(activity_router)
 
 
 @app.get("/")

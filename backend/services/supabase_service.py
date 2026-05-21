@@ -68,14 +68,48 @@ def complete_transcript(job_id: str, result: dict) -> None:
     print(f"[Analytics] record updated job_id={job_id} provider={payload.get('transcription_provider')}")
 
 
+_TOUCH_ACTIVE_THROTTLE_SECONDS = 15 * 60
+
+
 def touch_user_active(user_id: str) -> None:
+    """Stamp `user_credits.last_active_at = now` for the given user.
+
+    Throttled: skips the write if the existing timestamp is within
+    `_TOUCH_ACTIVE_THROTTLE_SECONDS` to avoid DB spam on every request.
+    No-op when no `user_credits` row exists for the user (e.g. Telegram
+    synthetic users) — caller does not need to guard.
+    """
     if not user_id:
         return
     try:
-        from datetime import datetime, timezone
-        now = datetime.now(timezone.utc).isoformat()
-        _client.table("user_credits").update({"last_active_at": now}).eq("user_id", user_id).execute()
-        print(f"[Monitoring] request tracked user_id={user_id}")
+        from datetime import datetime, timedelta, timezone
+
+        now = datetime.now(timezone.utc)
+        existing = (
+            _client.table("user_credits")
+            .select("last_active_at")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        if not existing:
+            return
+        last_raw = existing[0].get("last_active_at")
+        if last_raw:
+            try:
+                last_dt = datetime.fromisoformat(str(last_raw).replace("Z", "+00:00"))
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=timezone.utc)
+                if (now - last_dt) < timedelta(seconds=_TOUCH_ACTIVE_THROTTLE_SECONDS):
+                    return
+            except Exception:
+                pass
+        _client.table("user_credits").update(
+            {"last_active_at": now.isoformat()}
+        ).eq("user_id", user_id).execute()
+        print(f"[Monitoring] last_active_at updated user_id={user_id}")
     except Exception as exc:
         print(f"[Monitoring] touch_user_active failed: {exc}")
 

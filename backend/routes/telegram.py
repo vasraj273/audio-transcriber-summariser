@@ -48,6 +48,7 @@ from services.supabase_service import (
     fail_transcript,
     get_transcript_by_job,
     mark_transcript_processing,
+    touch_user_active,
 )
 
 logger = logging.getLogger(__name__)
@@ -134,6 +135,13 @@ async def _dispatch_update(update: dict) -> None:
         digest_service.upsert_chat_prefs(chat_id, _chat_user_id(chat_id))
     except Exception:
         logger.exception("[Telegram] upsert_chat_prefs failed for chat_id=%s", chat_id)
+
+    # Stamp user_credits.last_active_at (no-op when no credits row exists,
+    # which is the normal case for Telegram-only synthetic users).
+    try:
+        touch_user_active(_chat_user_id(chat_id))
+    except Exception:
+        logger.exception("[Telegram] touch_user_active failed for chat_id=%s", chat_id)
 
     # /start (or any /command)
     text = (message.get("text") or "").strip()

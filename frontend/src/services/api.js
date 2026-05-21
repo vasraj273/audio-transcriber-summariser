@@ -85,6 +85,19 @@ export async function chatWithAudio({ transcript, summary, messages, question })
   return data.answer;
 }
 
+export async function touchActive(userId) {
+  if (!userId) return;
+  try {
+    await fetch(`${BACKEND_URL}/activity/touch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId }),
+    });
+  } catch {
+    // best-effort; admin Last Active is non-critical.
+  }
+}
+
 async function runTranscriptAnalysis(type, records) {
   const response = await fetch(`${BACKEND_URL}/analysis/${type}`, {
     method: "POST",
