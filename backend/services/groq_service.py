@@ -1,3 +1,5 @@
+import json
+import logging
 import os
 import re
 import time
@@ -8,6 +10,8 @@ from dotenv import load_dotenv
 from services.analytics_service import record_api_call
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
@@ -306,6 +310,164 @@ KEY POINTS:
 
     raw = _llama_complete([{"role": "user", "content": prompt}], temperature=0.3)
     return _parse_llm_response(raw)
+
+
+# ---------------------------------------------------------------------------
+# Transcript translation (drives the "Output Language" UI control end-to-end).
+# Source words come back from AssemblyAI / Groq Whisper in the audio's source
+# language. When the user picks a different output language we translate every
+# segment via a Llama pass and reuse the same timestamps and speaker labels.
+# ---------------------------------------------------------------------------
+
+_LANGUAGE_CODE_HINTS = {
+    "english": ("en",),
+    "spanish": ("es",),
+    "french": ("fr",),
+    "german": ("de",),
+    "italian": ("it",),
+    "portuguese": ("pt",),
+    "hindi": ("hi",),
+    "urdu": ("ur",),
+    "arabic": ("ar",),
+    "chinese": ("zh",),
+    "japanese": ("ja",),
+    "korean": ("ko",),
+    "russian": ("ru",),
+    "bengali": ("bn",),
+    "punjabi": ("pa",),
+    "turkish": ("tr",),
+    "dutch": ("nl",),
+}
+
+
+def languages_match(detected_code: str, target_label: str) -> bool:
+    """True when the AssemblyAI/Whisper detected language code (e.g. ``"en"``)
+    matches the user-selected target language label (e.g. ``"English"``).
+    Used to skip a translation pass that would be a no-op."""
+    if not detected_code or not target_label:
+        return False
+    prefixes = _LANGUAGE_CODE_HINTS.get(target_label.strip().lower(), ())
+    code = detected_code.lower()
+    return any(code.startswith(p) for p in prefixes)
+
+
+def translate_segments(segments: list, target_language: str) -> list:
+    """Translate the ``text`` field on every segment into ``target_language``.
+
+    Preserves ``start``, ``end``, ``speaker``, and any other keys. Falls back
+    to the original text on parse/LLM failure so the user still sees something.
+    Batches segments to keep individual prompts under ~3000 chars.
+    """
+    if not segments or not target_language:
+        return segments
+
+    translated = [dict(seg) for seg in segments]
+    for batch_indices in _chunk_segments_for_translation(segments):
+        payload = [
+            {"i": i, "text": (segments[i].get("text") or "").strip()}
+            for i in batch_indices
+        ]
+        try:
+            new_texts = _translate_payload(payload, target_language)
+        except Exception as exc:
+            logger.warning("translate_segments batch failed (%s); keeping originals.", exc)
+            continue
+        for i, text in new_texts.items():
+            if 0 <= i < len(translated) and text:
+                translated[i]["text"] = text
+    return translated
+
+
+def translate_text(text: str, target_language: str) -> str:
+    """Translate a single chunk of free-form transcript text. Used when no
+    segments are available (e.g. older history rows). Returns the original
+    on failure."""
+    if not text or not target_language:
+        return text
+    try:
+        instructions = (
+            f"Translate the user's text into {target_language}. "
+            "Preserve meaning, tone, and paragraph breaks. "
+            "Return ONLY the translated text — no preface, no explanation, no quotes."
+        )
+        raw = _llama_complete(
+            [
+                {"role": "system", "content": instructions},
+                {"role": "user", "content": text},
+            ],
+            temperature=0.2,
+        )
+        return (raw or "").strip() or text
+    except Exception as exc:
+        logger.warning("translate_text failed (%s); returning original.", exc)
+        return text
+
+
+def _chunk_segments_for_translation(segments: list, max_chars: int = 2800) -> list:
+    chunks: list[list[int]] = []
+    current: list[int] = []
+    current_chars = 0
+    for i, seg in enumerate(segments):
+        size = len((seg.get("text") or "")) + 24  # overhead for JSON keys
+        if current and current_chars + size > max_chars:
+            chunks.append(current)
+            current = []
+            current_chars = 0
+        current.append(i)
+        current_chars += size
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _translate_payload(payload: list, target_language: str) -> dict:
+    instructions = (
+        f"You are a precise translator. Translate every item's `text` field into {target_language}. "
+        "Preserve meaning and tone. Do NOT add commentary or notes. "
+        "Return JSON only — a single array of objects, each with keys `i` (the original integer index "
+        "from the input, copied unchanged) and `text` (the translated string). "
+        "Include every index from the input. Do not wrap the array in any other key. "
+        "Do not include code fences."
+    )
+    user_payload = json.dumps(payload, ensure_ascii=False)
+    raw = _llama_complete(
+        [
+            {"role": "system", "content": instructions},
+            {"role": "user", "content": user_payload},
+        ],
+        temperature=0.2,
+    )
+    parsed = _safe_extract_json_array(raw)
+    result: dict[int, str] = {}
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        try:
+            idx = int(item.get("i"))
+        except (TypeError, ValueError):
+            continue
+        text = item.get("text")
+        if isinstance(text, str):
+            result[idx] = text.strip()
+    return result
+
+
+def _safe_extract_json_array(raw: str) -> list:
+    if not raw:
+        return []
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z0-9]*\n?", "", text)
+        text = re.sub(r"\n?```$", "", text)
+    start = text.find("[")
+    end = text.rfind("]")
+    if start == -1 or end == -1 or end <= start:
+        return []
+    try:
+        data = json.loads(text[start : end + 1])
+    except Exception:
+        return []
+    return data if isinstance(data, list) else []
 
 
 def compare_transcripts(records: list) -> str:

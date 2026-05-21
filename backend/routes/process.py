@@ -8,8 +8,11 @@ from services.groq_service import (
     _build_speaker_transcript,
     assess_transcription_quality,
     infer_speakers,
+    languages_match,
     summarise_transcript,
     transcribe_audio as groq_transcribe_audio,
+    translate_segments,
+    translate_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -87,6 +90,11 @@ def process_audio_file(file_path: str, options: dict) -> dict:
         summary_result = {"summary": "Summary unavailable (AI quota or service error). Transcript was generated successfully.", "key_points": []}
         summary_warning = str(exc)
     speaker_result = _resolve_speakers(transcription)
+    _maybe_translate_transcript(
+        transcription=transcription,
+        speaker_result=speaker_result,
+        target_language=options.get("output_language", "English"),
+    )
 
     combined_warning = quality["warning"]
     if summary_warning:
@@ -135,6 +143,46 @@ def _transcribe_with_fallback(file_path: str) -> dict:
             raise RuntimeError(
                 f"Transcription failed. AssemblyAI error: {exc}. Groq Whisper fallback error: {fallback_exc}."
             ) from fallback_exc
+
+
+def _maybe_translate_transcript(
+    *, transcription: dict, speaker_result: dict, target_language: str
+) -> None:
+    """Translate the transcript + segments + speaker_transcript in-place when
+    the user picked a target language different from the detected source.
+    No-op when ``target_language`` is ``"Same as Original"`` or the source
+    already matches. Failures are swallowed — caller still gets the original
+    transcript so a Llama outage never blocks a successful job."""
+    if not target_language or target_language == "Same as Original":
+        return
+    detected_code = (transcription.get("language") or "").strip()
+    if languages_match(detected_code, target_language):
+        return
+
+    segments = speaker_result.get("segments") or []
+    try:
+        if segments:
+            translated_segments = translate_segments(segments, target_language)
+            speaker_result["segments"] = translated_segments
+            speaker_result["speaker_transcript"] = _build_speaker_transcript(translated_segments)
+            joined = " ".join(
+                (s.get("text") or "").strip() for s in translated_segments
+            ).strip()
+            if joined:
+                transcription["text"] = joined
+        elif transcription.get("text"):
+            translated = translate_text(transcription["text"], target_language)
+            if translated:
+                transcription["text"] = translated
+                speaker_result["speaker_transcript"] = translated
+        logger.info(
+            "Translation complete src=%s -> %s segments=%d",
+            detected_code or "unknown",
+            target_language,
+            len(segments),
+        )
+    except Exception as exc:
+        logger.warning("Translation pass failed (%s); serving original transcript.", exc)
 
 
 def _resolve_speakers(transcription: dict) -> dict:
