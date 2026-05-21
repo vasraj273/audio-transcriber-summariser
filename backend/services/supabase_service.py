@@ -5,10 +5,25 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-_client: Client = create_client(
-    os.getenv("SUPABASE_URL"),
-    os.getenv("SUPABASE_KEY"),
-)
+_SUPABASE_URL = os.getenv("SUPABASE_URL")
+_SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+_SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+
+_client: Client = create_client(_SUPABASE_URL, _SUPABASE_KEY)
+
+# Service-role client used for tables that have RLS enabled (e.g. user_credits
+# per supabase_credits_rls.sql). The anon-key client cannot satisfy
+# `auth.uid() = user_id` policies because the backend has no end-user JWT
+# context, so writes are silently rejected. Falls back to the anon client with
+# a startup warning if SUPABASE_SERVICE_ROLE_KEY is not set on Render.
+if _SUPABASE_SERVICE_ROLE_KEY:
+    _service_client: Client = create_client(_SUPABASE_URL, _SUPABASE_SERVICE_ROLE_KEY)
+else:
+    _service_client = _client
+    print(
+        "[supabase_service] SUPABASE_SERVICE_ROLE_KEY not set — user_credits "
+        "writes (last_active_at touch) will be blocked by RLS."
+    )
 
 
 def create_processing_transcript(
@@ -86,7 +101,7 @@ def touch_user_active(user_id: str) -> None:
 
         now = datetime.now(timezone.utc)
         existing = (
-            _client.table("user_credits")
+            _service_client.table("user_credits")
             .select("last_active_at")
             .eq("user_id", user_id)
             .limit(1)
@@ -106,10 +121,14 @@ def touch_user_active(user_id: str) -> None:
                     return
             except Exception:
                 pass
-        _client.table("user_credits").update(
-            {"last_active_at": now.isoformat()}
-        ).eq("user_id", user_id).execute()
-        print(f"[Monitoring] last_active_at updated user_id={user_id}")
+        result = (
+            _service_client.table("user_credits")
+            .update({"last_active_at": now.isoformat()})
+            .eq("user_id", user_id)
+            .execute()
+        )
+        affected = len(result.data or [])
+        print(f"[Monitoring] last_active_at updated user_id={user_id} rows={affected}")
     except Exception as exc:
         print(f"[Monitoring] touch_user_active failed: {exc}")
 
