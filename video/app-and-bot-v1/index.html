@@ -1,0 +1,1003 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        width: 1920px; height: 1080px; overflow: hidden;
+        background: #0e1014;
+        font-family: "Bricolage Grotesque", system-ui, sans-serif;
+        color: #f4ede0;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .scene {
+        position: absolute; inset: 0;
+        width: 1920px; height: 1080px;
+        overflow: hidden;
+        background: #0e1014;
+      }
+      .scene-inner {
+        position: absolute; inset: 0;
+        width: 100%; height: 100%;
+        display: flex; flex-direction: column;
+        padding: 90px 140px;
+        box-sizing: border-box;
+      }
+      #scene1 { z-index: 1; }
+      #scene2, #scene3, #scene4, #scene5, #scene6, #scene7, #scene8, #scene9 {
+        opacity: 0; z-index: 2;
+      }
+
+      .top-rule {
+        position: absolute; top: 88px; left: 140px; right: 140px;
+        height: 1px; background: rgba(244, 237, 224, 0.14);
+        transform-origin: left center;
+      }
+      .bottom-rule {
+        position: absolute; bottom: 88px; left: 140px; right: 140px;
+        height: 1px; background: rgba(244, 237, 224, 0.10);
+        transform-origin: right center;
+      }
+      .brand-mark {
+        position: absolute; top: 56px; left: 140px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 18px; letter-spacing: 0.18em;
+        color: #c2b8a4; font-weight: 500;
+      }
+      .brand-mark b { color: #f5a64a; font-weight: 600; }
+      .scene-index {
+        position: absolute; bottom: 50px; right: 140px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 18px; letter-spacing: 0.16em;
+        color: #e0d4ba; font-variant-numeric: tabular-nums;
+        font-weight: 500;
+      }
+      .scene-label {
+        position: absolute; bottom: 50px; left: 140px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 18px; letter-spacing: 0.22em;
+        color: #e0d4ba; text-transform: uppercase;
+        font-weight: 500;
+      }
+      .eyebrow {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 22px; letter-spacing: 0.32em;
+        color: #f5a64a; text-transform: uppercase;
+        font-weight: 500;
+      }
+      .ghost {
+        position: absolute;
+        font-family: "Bricolage Grotesque", sans-serif;
+        font-weight: 800; color: #f5a64a;
+        opacity: 0.06; pointer-events: none;
+        letter-spacing: -0.04em; line-height: 0.85;
+      }
+      .glow {
+        position: absolute; border-radius: 50%;
+        filter: blur(80px); pointer-events: none;
+      }
+
+      .h-display {
+        font-size: 156px; line-height: 0.92; letter-spacing: -0.045em;
+        font-weight: 800; color: #f4ede0;
+      }
+      .h-display .accent {
+        color: #f5a64a; font-weight: 300; font-style: italic;
+      }
+      .h-mid {
+        font-size: 96px; line-height: 0.95;
+        letter-spacing: -0.035em; font-weight: 800; color: #f4ede0;
+      }
+      .h-mid .accent {
+        color: #f5a64a; font-weight: 300; font-style: italic;
+      }
+      .sub {
+        font-size: 30px; color: #c2b8a4; font-weight: 300;
+        line-height: 1.4; max-width: 1100px;
+      }
+
+      /* SCENE 1 */
+      .s1-stack { margin-top: auto; margin-bottom: auto; max-width: 1200px; }
+      .s1-stack .eyebrow { margin-bottom: 28px; }
+      .s1-stack .sub { margin-top: 36px; max-width: 880px; }
+      #s1-wave {
+        position: absolute; right: 140px; top: 50%;
+        transform: translateY(-50%);
+        display: flex; align-items: center; gap: 6px;
+        height: 320px; width: 520px;
+      }
+      #s1-wave .bar {
+        width: 8px; background: #f5a64a;
+        border-radius: 2px;
+        box-shadow: 0 0 18px rgba(245, 166, 74, 0.5);
+      }
+
+      /* SCENE 2 */
+      .twoway-row {
+        margin-top: auto; margin-bottom: auto;
+        display: grid; grid-template-columns: 1fr 1fr; gap: 80px;
+      }
+      .channel-card {
+        position: relative;
+        border: 1.5px solid rgba(244, 237, 224, 0.14);
+        background: rgba(244, 237, 224, 0.025);
+        border-radius: 22px; padding: 56px 56px 60px;
+      }
+      .channel-icon { font-size: 88px; line-height: 1; margin-bottom: 22px; }
+      .channel-name {
+        font-size: 60px; font-weight: 800; letter-spacing: -0.025em;
+        color: #f4ede0; margin-bottom: 14px;
+      }
+      .channel-tag {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 18px; letter-spacing: 0.16em;
+        color: #f5a64a; text-transform: uppercase; margin-bottom: 28px;
+      }
+      .channel-body {
+        font-size: 26px; line-height: 1.45; color: #d4c8af;
+        font-weight: 300; max-width: 480px;
+      }
+
+      /* SCENE 3 */
+      .web-row {
+        display: flex; align-items: center; gap: 100px;
+        height: 100%; margin-top: 30px;
+      }
+      .step-num {
+        font-family: "Bricolage Grotesque", sans-serif;
+        font-size: 320px; line-height: 0.85;
+        font-weight: 800; letter-spacing: -0.06em;
+        color: #f5a64a; flex-shrink: 0;
+      }
+      .step-body { flex: 1; }
+      .step-heading {
+        font-size: 96px; line-height: 0.95;
+        letter-spacing: -0.035em; font-weight: 800; color: #f4ede0;
+        margin-bottom: 22px;
+      }
+      .step-sub {
+        font-size: 30px; color: #c2b8a4; font-weight: 300;
+        line-height: 1.45; max-width: 800px; margin-bottom: 44px;
+      }
+      .format-pills { display: flex; gap: 12px; margin-bottom: 22px; flex-wrap: wrap; }
+      .pill {
+        padding: 8px 18px; border-radius: 999px;
+        border: 1.5px solid rgba(244, 237, 224, 0.18);
+        font-family: "JetBrains Mono", monospace;
+        font-size: 16px; letter-spacing: 0.1em;
+        color: #d4c8af; font-weight: 500;
+      }
+      .upload-card {
+        border: 2px dashed rgba(245, 166, 74, 0.45);
+        background: rgba(245, 166, 74, 0.04);
+        padding: 30px 38px; border-radius: 18px;
+        max-width: 700px;
+        display: flex; align-items: center; gap: 24px;
+      }
+      .file-icon {
+        width: 64px; height: 64px; border-radius: 12px;
+        background: rgba(245, 166, 74, 0.18);
+        border: 1.5px solid rgba(245, 166, 74, 0.6);
+        display: flex; align-items: center; justify-content: center;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 13px; letter-spacing: 0.06em;
+        color: #f5a64a; font-weight: 600;
+      }
+      .file-meta { flex: 1; }
+      .file-name { font-size: 24px; color: #f4ede0; font-weight: 500; margin-bottom: 4px; }
+      .file-size {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 18px; color: #c2b8a4;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* SCENE 4 */
+      .results-stack { margin-top: 12px; }
+      .results-grid {
+        display: grid; grid-template-columns: 1.05fr 1fr;
+        gap: 36px; margin-top: 22px;
+      }
+      .res-card {
+        background: rgba(244, 237, 224, 0.03);
+        border: 1.5px solid rgba(244, 237, 224, 0.10);
+        border-radius: 18px; padding: 30px 34px;
+      }
+      .res-card-label {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 15px; letter-spacing: 0.22em;
+        color: #f5a64a; text-transform: uppercase;
+        margin-bottom: 20px;
+      }
+      .speaker-line { margin-bottom: 14px; line-height: 1.4; }
+      .speaker-tag {
+        display: inline-block;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 14px; letter-spacing: 0.1em;
+        padding: 4px 10px; border-radius: 6px;
+        margin-right: 14px; font-weight: 600;
+        vertical-align: middle;
+      }
+      .sp-1 { background: rgba(245, 166, 74, 0.22); color: #f5a64a; }
+      .sp-2 { background: rgba(126, 168, 140, 0.22); color: #7ea88c; }
+      .speaker-text { font-size: 22px; color: #d6cfc1; font-weight: 300; line-height: 1.45; }
+      .summary-line {
+        font-size: 24px; color: #e4ddcf; font-weight: 300;
+        line-height: 1.45; margin-bottom: 12px;
+      }
+      .summary-line.key { color: #f4ede0; font-weight: 500; }
+      .summary-line .marker { color: #f5a64a; margin-right: 10px; }
+      .tabs { display: flex; gap: 12px; margin-top: 28px; flex-wrap: wrap; }
+      .tab {
+        padding: 11px 20px; border-radius: 10px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 16px; letter-spacing: 0.12em;
+        border: 1.5px solid rgba(244, 237, 224, 0.14);
+        color: #d4c8af; text-transform: uppercase; font-weight: 500;
+      }
+      .tab.active { background: #f5a64a; color: #0e1014; border-color: #f5a64a; }
+
+      /* SCENE 5 + 6 telegram */
+      .tg-frame-wrap {
+        position: absolute; right: 140px; top: 50%;
+        transform: translateY(-50%);
+        width: 540px;
+      }
+      .tg-frame {
+        background: #1a1c22;
+        border: 2px solid rgba(244, 237, 224, 0.14);
+        border-radius: 32px;
+        padding: 28px 26px;
+      }
+      .tg-header {
+        display: flex; align-items: center; gap: 14px;
+        padding-bottom: 18px; margin-bottom: 18px;
+        border-bottom: 1px solid rgba(244, 237, 224, 0.08);
+      }
+      .tg-avatar {
+        width: 44px; height: 44px; border-radius: 50%;
+        background: #f5a64a; color: #0e1014;
+        display: flex; align-items: center; justify-content: center;
+        font-weight: 800; font-size: 22px;
+      }
+      .tg-handle { font-size: 22px; font-weight: 600; color: #f4ede0; }
+      .tg-status { font-size: 15px; color: #7ea88c; margin-top: 1px; }
+      .tg-bubble {
+        background: rgba(244, 237, 224, 0.06);
+        border-radius: 16px 16px 16px 4px;
+        padding: 16px 20px;
+        font-size: 20px; line-height: 1.4;
+        color: #f4ede0; max-width: 88%;
+        margin-bottom: 12px;
+      }
+      .tg-bubble.from-me {
+        background: rgba(245, 166, 74, 0.18);
+        border: 1px solid rgba(245, 166, 74, 0.35);
+        border-radius: 16px 16px 4px 16px;
+        margin-left: auto;
+      }
+      .tg-bubble.voice {
+        display: flex; align-items: center; gap: 12px;
+        font-family: "JetBrains Mono", monospace;
+      }
+      .tg-bubble.voice .vbars {
+        display: flex; align-items: center; gap: 3px; height: 24px;
+      }
+      .tg-bubble.voice .vbars span {
+        width: 3px; background: #f5a64a; border-radius: 2px;
+      }
+      .tg-bubble b { color: #f5a64a; font-weight: 700; }
+      .tg-buttons-grid {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+        margin-top: 14px;
+      }
+      .tg-btn {
+        background: rgba(244, 237, 224, 0.08);
+        border: 1px solid rgba(244, 237, 224, 0.14);
+        border-radius: 10px;
+        padding: 12px 14px;
+        font-size: 17px; color: #f4ede0; font-weight: 500;
+        text-align: center;
+      }
+      .tg-side-stack { max-width: 920px; margin-top: auto; margin-bottom: auto; }
+      .tg-side-stack .eyebrow { margin-bottom: 24px; }
+      .tg-side-stack .h-mid { margin-bottom: 28px; }
+      .tg-side-list { display: flex; flex-direction: column; gap: 14px; }
+      .tg-side-item {
+        display: flex; align-items: center; gap: 18px;
+        font-size: 26px; color: #f4ede0; font-weight: 500;
+      }
+      .tg-side-dot {
+        width: 10px; height: 10px; border-radius: 50%;
+        background: #f5a64a; flex-shrink: 0;
+        box-shadow: 0 0 12px rgba(245, 166, 74, 0.65);
+      }
+
+      /* SCENE 7 commands */
+      .cmd-grid {
+        margin-top: auto; margin-bottom: auto;
+        display: grid; grid-template-columns: 1fr 1fr; gap: 18px 28px;
+      }
+      .cmd-row {
+        display: flex; align-items: baseline; gap: 22px;
+        padding: 20px 26px;
+        border-left: 3px solid rgba(245, 166, 74, 0.6);
+        background: rgba(244, 237, 224, 0.025);
+        border-radius: 0 12px 12px 0;
+      }
+      .cmd-name {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 28px; color: #f5a64a; font-weight: 600;
+        letter-spacing: 0.005em; min-width: 220px;
+      }
+      .cmd-desc {
+        font-size: 22px; color: #e0d4ba; font-weight: 400;
+        line-height: 1.35;
+      }
+
+      /* SCENE 8 digest */
+      .digest-row {
+        display: flex; align-items: center; gap: 80px;
+        margin-top: auto; margin-bottom: auto;
+      }
+      .digest-text { flex: 1; max-width: 760px; }
+      .digest-text .eyebrow { margin-bottom: 24px; }
+      .digest-text .h-mid { margin-bottom: 26px; font-size: 88px; }
+      .digest-bullets {
+        font-size: 26px; color: #d4c8af; font-weight: 300;
+        line-height: 1.5;
+      }
+      .digest-bullets .row { margin-bottom: 8px; }
+      .digest-bullets b { color: #f4ede0; font-weight: 500; }
+      .digest-frame {
+        flex-shrink: 0; width: 580px;
+        background: #1a1c22;
+        border: 2px solid rgba(244, 237, 224, 0.14);
+        border-radius: 28px; padding: 28px 28px 24px;
+      }
+      .digest-bubble {
+        background: rgba(244, 237, 224, 0.06);
+        border-radius: 16px 16px 16px 4px;
+        padding: 22px 24px;
+      }
+      .digest-bubble-title {
+        font-size: 22px; font-weight: 700; color: #f5a64a;
+        margin-bottom: 14px;
+      }
+      .digest-bubble-line {
+        font-size: 18px; color: #f4ede0; font-weight: 400;
+        line-height: 1.45; margin-bottom: 4px;
+      }
+      .digest-bubble-line.dim { color: #dccfb6; font-weight: 300; }
+      .digest-bubble-line b { color: #f5a64a; font-weight: 600; }
+
+      /* SCENE 9 CTA */
+      #scene9 .scene-inner {
+        align-items: center; justify-content: center;
+        text-align: center; padding: 0;
+      }
+      .cta-stack { max-width: 1500px; }
+      .cta-eyebrow {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 22px; letter-spacing: 0.32em;
+        color: #f5a64a; text-transform: uppercase; margin-bottom: 28px;
+      }
+      .cta-headline {
+        font-size: 168px; line-height: 0.92;
+        letter-spacing: -0.05em; font-weight: 800;
+        color: #f4ede0; margin-bottom: 36px;
+      }
+      .cta-headline .accent { color: #f5a64a; font-style: italic; font-weight: 300; }
+      .cta-row {
+        display: flex; gap: 22px; justify-content: center;
+        flex-wrap: wrap;
+      }
+      .cta-card {
+        display: inline-flex; align-items: center; gap: 18px;
+        padding: 22px 36px; border-radius: 14px;
+        background: #f5a64a; color: #0e1014;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 26px; font-weight: 600;
+        letter-spacing: 0.01em;
+        box-shadow: 0 0 80px rgba(245, 166, 74, 0.35);
+      }
+      .cta-card.ghost {
+        background: transparent; color: #f4ede0;
+        border: 2px solid rgba(244, 237, 224, 0.24);
+        box-shadow: none;
+      }
+      .cta-card.ghost .accent { color: #f5a64a; }
+      .cta-stamp {
+        position: absolute; bottom: 60px; left: 50%;
+        transform: translateX(-50%);
+        font-family: "JetBrains Mono", monospace;
+        font-size: 17px; letter-spacing: 0.28em;
+        color: #c2b8a4; text-transform: uppercase;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="38"
+      data-width="1920"
+      data-height="1080"
+    >
+      <!-- SCENE 1 HOOK -->
+      <div id="scene1" class="scene">
+        <div class="glow" data-layout-allow-overflow id="s1-glow" style="width: 900px; height: 900px; right: -240px; bottom: -300px; background: radial-gradient(circle, rgba(245,166,74,0.55), rgba(245,166,74,0));"></div>
+        <div class="ghost" data-layout-allow-overflow style="font-size: 520px; left: -60px; bottom: -180px;">audio</div>
+        <div class="scene-inner">
+          <div class="top-rule" id="s1-top-rule"></div>
+          <div class="brand-mark">AUDIO · SUMMARISER &nbsp;&nbsp; <b>▸</b></div>
+          <div class="s1-stack">
+            <div class="eyebrow" id="s1-eyebrow">WEB APP · TELEGRAM BOT · AI ASSISTANT</div>
+            <h1 class="h-display">
+              <span id="s1-h1">Audio in.</span><br/>
+              <span class="accent" id="s1-h2">Insight out.</span>
+            </h1>
+            <p class="sub" id="s1-sub">
+              Drop a recording, get a transcript, summary, action items, and a
+              full daily brief. Works in your browser. Works in Telegram.
+            </p>
+          </div>
+          <div id="s1-wave">
+            <div class="bar" style="height: 32%;"></div>
+            <div class="bar" style="height: 68%;"></div>
+            <div class="bar" style="height: 44%;"></div>
+            <div class="bar" style="height: 88%;"></div>
+            <div class="bar" style="height: 56%;"></div>
+            <div class="bar" style="height: 96%;"></div>
+            <div class="bar" style="height: 38%;"></div>
+            <div class="bar" style="height: 72%;"></div>
+            <div class="bar" style="height: 48%;"></div>
+            <div class="bar" style="height: 84%;"></div>
+            <div class="bar" style="height: 28%;"></div>
+            <div class="bar" style="height: 64%;"></div>
+            <div class="bar" style="height: 52%;"></div>
+            <div class="bar" style="height: 78%;"></div>
+            <div class="bar" style="height: 40%;"></div>
+            <div class="bar" style="height: 60%;"></div>
+            <div class="bar" style="height: 92%;"></div>
+            <div class="bar" style="height: 46%;"></div>
+            <div class="bar" style="height: 70%;"></div>
+            <div class="bar" style="height: 34%;"></div>
+            <div class="bar" style="height: 58%;"></div>
+            <div class="bar" style="height: 82%;"></div>
+            <div class="bar" style="height: 42%;"></div>
+            <div class="bar" style="height: 66%;"></div>
+          </div>
+          <div class="bottom-rule" id="s1-bot-rule"></div>
+          <div class="scene-label">▸ Intro</div>
+          <div class="scene-index">01 / 09</div>
+        </div>
+      </div>
+
+      <!-- SCENE 2 TWO WAYS -->
+      <div id="scene2" class="scene">
+        <div class="glow" data-layout-allow-overflow style="width: 800px; height: 800px; left: -260px; top: -260px; background: radial-gradient(circle, rgba(245,166,74,0.30), rgba(245,166,74,0));"></div>
+        <div class="ghost" data-layout-allow-overflow style="font-size: 380px; right: -100px; bottom: -120px;">use</div>
+        <div class="scene-inner">
+          <div class="top-rule" id="s2-top-rule"></div>
+          <div class="brand-mark">AUDIO · SUMMARISER &nbsp;&nbsp; <b>▸</b></div>
+          <div style="margin-top: 8px;">
+            <div class="eyebrow" id="s2-eb" style="margin-bottom: 18px;">TWO WAYS TO USE</div>
+            <div class="h-mid" id="s2-heading">Pick your channel.</div>
+          </div>
+          <div class="twoway-row" id="s2-row">
+            <div class="channel-card" id="s2-card-web">
+              <div class="channel-icon">🌐</div>
+              <div class="channel-tag">Web App</div>
+              <div class="channel-name">Browser</div>
+              <div class="channel-body">
+                Sign in with Google. Drop a file. Full dashboard with
+                synced playback, compare, merge, and history.
+              </div>
+            </div>
+            <div class="channel-card" id="s2-card-tg">
+              <div class="channel-icon">💬</div>
+              <div class="channel-tag">Telegram</div>
+              <div class="channel-name">Chat</div>
+              <div class="channel-body">
+                Open the bot. Send a voice note or recording.
+                Get back transcript, summary, and tasks instantly.
+              </div>
+            </div>
+          </div>
+          <div class="bottom-rule" id="s2-bot-rule"></div>
+          <div class="scene-label">▸ Channels</div>
+          <div class="scene-index">02 / 09</div>
+        </div>
+      </div>
+
+      <!-- SCENE 3 WEB UPLOAD -->
+      <div id="scene3" class="scene">
+        <div class="glow" data-layout-allow-overflow style="width: 700px; height: 700px; left: -200px; top: -180px; background: radial-gradient(circle, rgba(245,166,74,0.32), rgba(245,166,74,0));"></div>
+        <div class="ghost" data-layout-allow-overflow style="font-size: 420px; right: -80px; bottom: -120px;">drop</div>
+        <div class="scene-inner">
+          <div class="top-rule" id="s3-top-rule"></div>
+          <div class="brand-mark">AUDIO · SUMMARISER &nbsp;&nbsp; <b>▸</b></div>
+          <div class="web-row">
+            <div class="step-num" id="s3-num">01</div>
+            <div class="step-body">
+              <div class="eyebrow" id="s3-eb" style="margin-bottom: 22px;">WEB · STEP 01</div>
+              <div class="step-heading" id="s3-heading">Drop any audio.</div>
+              <div class="step-sub" id="s3-sub">
+                MP3, WAV, M4A, OGG. Up to 25 MB. Auto-detects language
+                and identifies speakers natively.
+              </div>
+              <div class="format-pills" id="s3-pills">
+                <div class="pill">MP3</div>
+                <div class="pill">WAV</div>
+                <div class="pill">M4A</div>
+                <div class="pill">OGG</div>
+                <div class="pill">UP TO 25MB</div>
+              </div>
+              <div class="upload-card" id="s3-card">
+                <div class="file-icon">MP3</div>
+                <div class="file-meta">
+                  <div class="file-name">team-standup-mon.mp3</div>
+                  <div class="file-size">14.2 MB &nbsp;·&nbsp; 22:18 duration</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="bottom-rule" id="s3-bot-rule"></div>
+          <div class="scene-label">▸ Step 01</div>
+          <div class="scene-index">03 / 09</div>
+        </div>
+      </div>
+
+      <!-- SCENE 4 WEB RESULTS -->
+      <div id="scene4" class="scene">
+        <div class="glow" data-layout-allow-overflow style="width: 720px; height: 720px; right: -180px; top: 50%; background: radial-gradient(circle, rgba(245,166,74,0.22), rgba(245,166,74,0));"></div>
+        <div class="ghost" data-layout-allow-overflow style="font-size: 380px; left: -40px; top: -80px;">read</div>
+        <div class="scene-inner">
+          <div class="top-rule" id="s4-top-rule"></div>
+          <div class="brand-mark">AUDIO · SUMMARISER &nbsp;&nbsp; <b>▸</b></div>
+          <div class="results-stack">
+            <div class="eyebrow" id="s4-eb" style="margin-bottom: 14px;">WEB · STEP 02</div>
+            <div class="h-mid" id="s4-heading" style="font-size: 88px; margin-bottom: 10px;">
+              Read, search, chat.
+            </div>
+            <div class="sub" id="s4-sub" style="max-width: 1300px;">
+              Transcript with synced playback. Summary plus key points.
+              Chat with the audio. Compare, merge, and export as PDF.
+            </div>
+          </div>
+          <div class="results-grid">
+            <div class="res-card" id="s4-card-tx">
+              <div class="res-card-label">▸ Transcript · Speakers</div>
+              <div class="speaker-line">
+                <span class="speaker-tag sp-1">SPEAKER 1</span>
+                <span class="speaker-text">Can we lock the Friday ship date?</span>
+              </div>
+              <div class="speaker-line">
+                <span class="speaker-tag sp-2">SPEAKER 2</span>
+                <span class="speaker-text">Yes — EOD Friday. I'll handle release notes.</span>
+              </div>
+              <div class="speaker-line">
+                <span class="speaker-tag sp-1">SPEAKER 1</span>
+                <span class="speaker-text">Perfect. I'll send the kickoff email after this.</span>
+              </div>
+            </div>
+            <div class="res-card" id="s4-card-sum">
+              <div class="res-card-label">▸ Summary · Key Points</div>
+              <div class="summary-line key"><span class="marker">●</span>Friday ship date confirmed.</div>
+              <div class="summary-line"><span class="marker">●</span>Speaker 2 to draft release notes.</div>
+              <div class="summary-line"><span class="marker">●</span>Speaker 1 to send kickoff email.</div>
+              <div class="summary-line" style="margin-top: 12px; color: #c2b8a4; font-size: 20px;">
+                3 action items · 1 deadline · 2 owners
+              </div>
+            </div>
+          </div>
+          <div class="tabs" id="s4-tabs">
+            <div class="tab">▸ Synced</div>
+            <div class="tab active">Summary</div>
+            <div class="tab">Key points</div>
+            <div class="tab">Chat</div>
+            <div class="tab">Compare</div>
+            <div class="tab">PDF</div>
+          </div>
+          <div class="bottom-rule" id="s4-bot-rule"></div>
+          <div class="scene-label">▸ Web Results</div>
+          <div class="scene-index">04 / 09</div>
+        </div>
+      </div>
+
+      <!-- SCENE 5 TELEGRAM SEND -->
+      <div id="scene5" class="scene">
+        <div class="glow" data-layout-allow-overflow style="width: 720px; height: 720px; left: -200px; bottom: -180px; background: radial-gradient(circle, rgba(126,168,140,0.22), rgba(126,168,140,0));"></div>
+        <div class="ghost" data-layout-allow-overflow style="font-size: 420px; left: -40px; top: -80px;">chat</div>
+        <div class="scene-inner">
+          <div class="top-rule" id="s5-top-rule"></div>
+          <div class="brand-mark">AUDIO · SUMMARISER &nbsp;&nbsp; <b>▸</b></div>
+          <div class="tg-side-stack">
+            <div class="eyebrow" id="s5-eb">TELEGRAM · STEP 01</div>
+            <div class="h-mid" id="s5-heading">
+              <span>Send a voice.</span><br/>
+              <span class="accent">That's it.</span>
+            </div>
+            <div class="tg-side-list" id="s5-list">
+              <div class="tg-side-item"><span class="tg-side-dot"></span>Voice notes</div>
+              <div class="tg-side-item"><span class="tg-side-dot"></span>Audio files</div>
+              <div class="tg-side-item"><span class="tg-side-dot"></span>Call recordings</div>
+              <div class="tg-side-item"><span class="tg-side-dot"></span>Meetings &amp; lectures</div>
+            </div>
+          </div>
+          <div class="tg-frame-wrap" id="s5-frame">
+            <div class="tg-frame">
+              <div class="tg-header">
+                <div class="tg-avatar">A</div>
+                <div>
+                  <div class="tg-handle">@AudioSummariserBot</div>
+                  <div class="tg-status">● online</div>
+                </div>
+              </div>
+              <div class="tg-bubble" id="s5-b1">
+                👋 Send me audio and I'll transcribe + summarise.
+              </div>
+              <div class="tg-bubble from-me voice" id="s5-b2">
+                <span style="font-size: 22px;">▶</span>
+                <span class="vbars">
+                  <span style="height: 30%"></span>
+                  <span style="height: 70%"></span>
+                  <span style="height: 45%"></span>
+                  <span style="height: 85%"></span>
+                  <span style="height: 55%"></span>
+                  <span style="height: 90%"></span>
+                  <span style="height: 38%"></span>
+                  <span style="height: 65%"></span>
+                  <span style="height: 50%"></span>
+                  <span style="height: 78%"></span>
+                  <span style="height: 35%"></span>
+                  <span style="height: 60%"></span>
+                </span>
+                <span style="font-size: 16px;">0:42</span>
+              </div>
+              <div class="tg-bubble" id="s5-b3">
+                ⏳ Processing — this may take a minute…
+              </div>
+            </div>
+          </div>
+          <div class="bottom-rule" id="s5-bot-rule"></div>
+          <div class="scene-label">▸ Telegram Step 01</div>
+          <div class="scene-index">05 / 09</div>
+        </div>
+      </div>
+
+      <!-- SCENE 6 TELEGRAM REPLY -->
+      <div id="scene6" class="scene">
+        <div class="glow" data-layout-allow-overflow style="width: 720px; height: 720px; right: -200px; top: -180px; background: radial-gradient(circle, rgba(245,166,74,0.30), rgba(245,166,74,0));"></div>
+        <div class="ghost" data-layout-allow-overflow style="font-size: 380px; right: -60px; bottom: -100px;">reply</div>
+        <div class="scene-inner">
+          <div class="top-rule" id="s6-top-rule"></div>
+          <div class="brand-mark">AUDIO · SUMMARISER &nbsp;&nbsp; <b>▸</b></div>
+          <div class="tg-side-stack">
+            <div class="eyebrow" id="s6-eb">TELEGRAM · STEP 02</div>
+            <div class="h-mid" id="s6-heading">
+              <span>Get back</span><br/>
+              <span class="accent">everything.</span>
+            </div>
+            <div class="tg-side-list" id="s6-list">
+              <div class="tg-side-item"><span class="tg-side-dot"></span>Summary &amp; key points</div>
+              <div class="tg-side-item"><span class="tg-side-dot"></span>Action items (auto-extracted)</div>
+              <div class="tg-side-item"><span class="tg-side-dot"></span>People · Dates · Deadlines</div>
+              <div class="tg-side-item"><span class="tg-side-dot"></span>🔴 Urgent flagged automatically</div>
+            </div>
+          </div>
+          <div class="tg-frame-wrap" id="s6-frame">
+            <div class="tg-frame">
+              <div class="tg-bubble" id="s6-b1">
+                📝 <b>Summary</b><br/>
+                Team confirmed Friday ship. Release notes assigned to S2. Kickoff email to follow.
+              </div>
+              <div class="tg-bubble" id="s6-b2">
+                ✅ <b>Action Items</b><br/>
+                • Send proposal Friday<br/>
+                • Draft release notes<br/>
+                • 🔴 Call client today
+              </div>
+              <div class="tg-buttons-grid" id="s6-btns">
+                <div class="tg-btn">✅ Done</div>
+                <div class="tg-btn">📅 Calendar</div>
+                <div class="tg-btn">📧 Email</div>
+                <div class="tg-btn">🌐 Translate</div>
+                <div class="tg-btn">💬 Ask</div>
+                <div class="tg-btn">❌ Dismiss</div>
+              </div>
+            </div>
+          </div>
+          <div class="bottom-rule" id="s6-bot-rule"></div>
+          <div class="scene-label">▸ Telegram Step 02</div>
+          <div class="scene-index">06 / 09</div>
+        </div>
+      </div>
+
+      <!-- SCENE 7 COMMANDS -->
+      <div id="scene7" class="scene">
+        <div class="glow" data-layout-allow-overflow style="width: 800px; height: 800px; left: -200px; top: 40%; background: radial-gradient(circle, rgba(245,166,74,0.18), rgba(245,166,74,0));"></div>
+        <div class="ghost" data-layout-allow-overflow style="font-size: 420px; right: -120px; top: -120px;">/cmd</div>
+        <div class="scene-inner">
+          <div class="top-rule" id="s7-top-rule"></div>
+          <div class="brand-mark">AUDIO · SUMMARISER &nbsp;&nbsp; <b>▸</b></div>
+          <div style="margin-top: 8px;">
+            <div class="eyebrow" id="s7-eb" style="margin-bottom: 18px;">TELEGRAM · COMMANDS</div>
+            <div class="h-mid" id="s7-heading" style="margin-bottom: 32px;">Type a slash.</div>
+          </div>
+          <div class="cmd-grid" id="s7-grid">
+            <div class="cmd-row"><div class="cmd-name">/digest</div><div class="cmd-desc">Today's AI brief</div></div>
+            <div class="cmd-row"><div class="cmd-name">/stats</div><div class="cmd-desc">Productivity score</div></div>
+            <div class="cmd-row"><div class="cmd-name">/tasks</div><div class="cmd-desc">Pending action items</div></div>
+            <div class="cmd-row"><div class="cmd-name">/topics</div><div class="cmd-desc">Recurring themes (7d)</div></div>
+            <div class="cmd-row"><div class="cmd-name">/people</div><div class="cmd-desc">Important people (7d)</div></div>
+            <div class="cmd-row"><div class="cmd-name">/timezone</div><div class="cmd-desc">Set your local timezone</div></div>
+            <div class="cmd-row"><div class="cmd-name">/digest_on 8pm</div><div class="cmd-desc">Schedule daily digest</div></div>
+            <div class="cmd-row"><div class="cmd-name">/exit</div><div class="cmd-desc">Leave ask / email mode</div></div>
+          </div>
+          <div class="bottom-rule" id="s7-bot-rule"></div>
+          <div class="scene-label">▸ Commands</div>
+          <div class="scene-index">07 / 09</div>
+        </div>
+      </div>
+
+      <!-- SCENE 8 DAILY DIGEST -->
+      <div id="scene8" class="scene">
+        <div class="glow" data-layout-allow-overflow style="width: 800px; height: 800px; left: 40%; top: 60%; background: radial-gradient(circle, rgba(245,166,74,0.28), rgba(245,166,74,0));"></div>
+        <div class="ghost" data-layout-allow-overflow style="font-size: 420px; left: -80px; bottom: -180px;">brief</div>
+        <div class="scene-inner">
+          <div class="top-rule" id="s8-top-rule"></div>
+          <div class="brand-mark">AUDIO · SUMMARISER &nbsp;&nbsp; <b>▸</b></div>
+          <div class="digest-row" id="s8-row">
+            <div class="digest-text">
+              <div class="eyebrow" id="s8-eb">EVERY DAY · 8:00 PM</div>
+              <div class="h-mid" id="s8-heading">
+                <span>Your day,</span><br/>
+                <span class="accent">summarised.</span>
+              </div>
+              <div class="digest-bullets" id="s8-bullets">
+                <div class="row">• <b>Recurring themes</b> across your week</div>
+                <div class="row">• <b>Important people</b> mentioned most</div>
+                <div class="row">• <b>Pending tasks</b> &amp; deadlines</div>
+                <div class="row">• <b>Productivity score</b> from real work</div>
+              </div>
+            </div>
+            <div class="digest-frame" id="s8-frame">
+              <div class="digest-bubble">
+                <div class="digest-bubble-title">🧭 Daily Digest — 2026-05-19</div>
+                <div class="digest-bubble-line"><b>🎙 Recordings:</b> 4 · 1h 22m</div>
+                <div class="digest-bubble-line dim">📊 Productivity: 78/100 — 6 done, 3 pending</div>
+                <div class="digest-bubble-line dim">📋 Pending: Send proposal · Call Raj</div>
+                <div class="digest-bubble-line dim">⏰ Deadline: Report due tomorrow</div>
+                <div class="digest-bubble-line dim">🔁 Themes: client, internship, exam</div>
+                <div class="digest-bubble-line dim">👥 People: Raj · Maria · Priya</div>
+              </div>
+            </div>
+          </div>
+          <div class="bottom-rule" id="s8-bot-rule"></div>
+          <div class="scene-label">▸ Daily Digest</div>
+          <div class="scene-index">08 / 09</div>
+        </div>
+      </div>
+
+      <!-- SCENE 9 CTA -->
+      <div id="scene9" class="scene">
+        <div class="glow" data-layout-allow-overflow id="s9-glow" style="width: 1400px; height: 1400px; left: 50%; top: 50%; transform: translate(-50%, -50%); background: radial-gradient(circle, rgba(245,166,74,0.45), rgba(245,166,74,0));"></div>
+        <div class="ghost" data-layout-allow-overflow style="font-size: 620px; left: 50%; transform: translateX(-50%); top: -260px; opacity: 0.045;">try</div>
+        <div class="scene-inner">
+          <div class="cta-stack">
+            <div class="cta-eyebrow" id="s9-eb">▸ START IN 30 SECONDS · 100 CREDITS FREE</div>
+            <h1 class="cta-headline">
+              <span id="s9-h1">Try it</span>
+              <span class="accent" id="s9-h2">free.</span>
+            </h1>
+            <div class="cta-row" id="s9-row">
+              <div class="cta-card" id="s9-url-web">
+                <span>🌐 audio-transcriber-summariser.vercel.app</span>
+              </div>
+              <div class="cta-card ghost" id="s9-url-tg">
+                <span>💬 <span class="accent">@AudioSummariserBot</span> on Telegram</span>
+              </div>
+            </div>
+          </div>
+          <div class="cta-stamp" id="s9-stamp">▸ ASSEMBLYAI · GROQ · SUPABASE</div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      function pushTransition(outId, inId, t, dur = 0.42) {
+        tl.set("#" + inId, { opacity: 1, x: 1920 }, t);
+        tl.to("#" + inId, { x: 0, duration: dur, ease: "power3.inOut" }, t);
+        tl.to("#" + outId, { x: -1920, duration: dur, ease: "power3.inOut" }, t);
+        tl.set("#" + outId, { opacity: 0 }, t + dur);
+      }
+      function blurFade(outId, inId, t, dur = 0.5) {
+        tl.set("#" + inId, { opacity: 0, filter: "blur(18px)" }, t);
+        tl.to("#" + inId, { opacity: 1, filter: "blur(0px)", duration: dur, ease: "power2.out" }, t);
+        tl.to("#" + outId, { opacity: 0, filter: "blur(18px)", duration: dur * 0.85, ease: "power2.in" }, t);
+        tl.set("#" + outId, { opacity: 0, filter: "blur(0px)" }, t + dur);
+      }
+
+      // SCENE 1 HOOK 0—3.6
+      tl.fromTo("#s1-top-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.7, ease: "expo.out" }, 0.15);
+      tl.fromTo("#s1-eyebrow", { y: 24, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: "power2.out" }, 0.4);
+      tl.fromTo("#s1-h1", { y: 70, opacity: 0 }, { y: 0, opacity: 1, duration: 0.7, ease: "expo.out" }, 0.55);
+      tl.fromTo("#s1-h2", { y: 70, opacity: 0 }, { y: 0, opacity: 1, duration: 0.7, ease: "expo.out" }, 0.75);
+      tl.fromTo("#s1-sub", { y: 22, opacity: 0 }, { y: 0, opacity: 1, duration: 0.55, ease: "power2.out" }, 1.0);
+      tl.fromTo("#s1-wave .bar",
+        { scaleY: 0, opacity: 0 },
+        { scaleY: 1, opacity: 1, duration: 0.4, ease: "back.out(1.8)",
+          stagger: { each: 0.018, from: "center" }, transformOrigin: "50% 50%" },
+        0.6);
+      tl.to("#s1-wave .bar",
+        { scaleY: 0.55, duration: 0.85, ease: "sine.inOut",
+          yoyo: true, repeat: 2,
+          stagger: { each: 0.04, from: "center", yoyo: true, repeat: 2 },
+          transformOrigin: "50% 50%" },
+        1.4);
+      tl.to("#s1-glow", { scale: 1.1, duration: 1.8, ease: "sine.inOut", yoyo: true, repeat: 1, transformOrigin: "50% 50%" }, 0.5);
+      tl.fromTo("#s1-bot-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.7, ease: "expo.out" }, 0.4);
+
+      blurFade("scene1", "scene2", 3.4, 0.5);
+
+      // SCENE 2 TWO WAYS 3.9—7.6
+      tl.fromTo("#s2-top-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "expo.out" }, 3.95);
+      tl.fromTo("#s2-eb", { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: "power2.out" }, 4.05);
+      tl.fromTo("#s2-heading", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "expo.out" }, 4.2);
+      tl.fromTo("#s2-card-web",
+        { x: -50, opacity: 0, scale: 0.96 },
+        { x: 0, opacity: 1, scale: 1, duration: 0.6, ease: "power3.out" }, 4.55);
+      tl.fromTo("#s2-card-tg",
+        { x: 50, opacity: 0, scale: 0.96 },
+        { x: 0, opacity: 1, scale: 1, duration: 0.6, ease: "back.out(1.3)" }, 4.75);
+      tl.fromTo("#s2-bot-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "expo.out" }, 4.0);
+
+      pushTransition("scene2", "scene3", 7.25, 0.42);
+
+      // SCENE 3 WEB UPLOAD 7.67—11.6
+      tl.fromTo("#s3-top-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "expo.out" }, 7.7);
+      tl.fromTo("#s3-num",
+        { x: -80, opacity: 0, scale: 0.9 },
+        { x: 0, opacity: 1, scale: 1, duration: 0.7, ease: "power3.out" }, 7.85);
+      tl.fromTo("#s3-eb", { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: "power2.out" }, 8.05);
+      tl.fromTo("#s3-heading", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "expo.out" }, 8.15);
+      tl.fromTo("#s3-sub", { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: "power2.out" }, 8.35);
+      tl.fromTo("#s3-pills .pill",
+        { y: 14, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.4, ease: "back.out(1.5)", stagger: 0.06 },
+        8.55);
+      tl.fromTo("#s3-card",
+        { y: 30, opacity: 0, scale: 0.96 },
+        { y: 0, opacity: 1, scale: 1, duration: 0.55, ease: "power3.out" }, 8.95);
+      tl.to("#s3-num", { y: -14, duration: 1.8, ease: "sine.inOut", yoyo: true, repeat: 1 }, 8.6);
+      tl.fromTo("#s3-bot-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "expo.out" }, 8.0);
+
+      pushTransition("scene3", "scene4", 11.28, 0.42);
+
+      // SCENE 4 WEB RESULTS 11.7—16
+      tl.fromTo("#s4-top-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "expo.out" }, 11.75);
+      tl.fromTo("#s4-eb", { y: 16, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: "power2.out" }, 11.85);
+      tl.fromTo("#s4-heading", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "expo.out" }, 12.0);
+      tl.fromTo("#s4-sub", { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: "power2.out" }, 12.2);
+      tl.fromTo("#s4-card-tx",
+        { x: -50, opacity: 0 },
+        { x: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 12.4);
+      tl.fromTo("#s4-card-sum",
+        { x: 50, opacity: 0 },
+        { x: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 12.55);
+      tl.fromTo("#s4-card-tx .speaker-line",
+        { y: 16, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.35, ease: "power2.out", stagger: 0.12 }, 12.75);
+      tl.fromTo("#s4-card-sum .summary-line",
+        { y: 12, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.35, ease: "power2.out", stagger: 0.1 }, 12.85);
+      tl.fromTo("#s4-tabs .tab",
+        { y: 16, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.34, ease: "back.out(1.4)", stagger: 0.06 }, 13.5);
+      tl.to("#s4-tabs .tab.active",
+        { boxShadow: "0 0 28px rgba(245, 166, 74, 0.55)", duration: 0.7, ease: "sine.inOut", yoyo: true, repeat: 1 }, 14.1);
+      tl.fromTo("#s4-bot-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "expo.out" }, 11.85);
+
+      blurFade("scene4", "scene5", 15.7, 0.5);
+
+      // SCENE 5 TELEGRAM SEND 16.2—20
+      tl.fromTo("#s5-top-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "expo.out" }, 16.25);
+      tl.fromTo("#s5-eb", { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: "power2.out" }, 16.35);
+      tl.fromTo("#s5-heading", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "expo.out" }, 16.5);
+      tl.fromTo("#s5-list .tg-side-item",
+        { x: -20, opacity: 0 },
+        { x: 0, opacity: 1, duration: 0.4, ease: "power3.out", stagger: 0.08 }, 16.85);
+      tl.fromTo("#s5-frame",
+        { x: 80, opacity: 0, scale: 0.96 },
+        { x: 0, opacity: 1, scale: 1, duration: 0.7, ease: "expo.out" }, 16.6);
+      tl.fromTo(["#s5-b1", "#s5-b2", "#s5-b3"],
+        { y: 18, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.4, ease: "power2.out", stagger: 0.22 }, 17.0);
+      tl.fromTo("#s5-bot-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "expo.out" }, 16.35);
+
+      pushTransition("scene5", "scene6", 19.7, 0.42);
+
+      // SCENE 6 TELEGRAM REPLY 20.12—24.5
+      tl.fromTo("#s6-top-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "expo.out" }, 20.17);
+      tl.fromTo("#s6-eb", { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: "power2.out" }, 20.27);
+      tl.fromTo("#s6-heading", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "expo.out" }, 20.42);
+      tl.fromTo("#s6-list .tg-side-item",
+        { x: -20, opacity: 0 },
+        { x: 0, opacity: 1, duration: 0.4, ease: "power3.out", stagger: 0.08 }, 20.75);
+      tl.fromTo("#s6-frame",
+        { x: 80, opacity: 0, scale: 0.96 },
+        { x: 0, opacity: 1, scale: 1, duration: 0.65, ease: "expo.out" }, 20.5);
+      tl.fromTo(["#s6-b1", "#s6-b2"],
+        { y: 18, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.4, ease: "power2.out", stagger: 0.18 }, 20.95);
+      tl.fromTo("#s6-btns .tg-btn",
+        { y: 14, opacity: 0, scale: 0.95 },
+        { y: 0, opacity: 1, scale: 1, duration: 0.35, ease: "back.out(1.5)", stagger: 0.05 }, 21.5);
+      tl.fromTo("#s6-bot-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "expo.out" }, 20.4);
+
+      pushTransition("scene6", "scene7", 24.2, 0.42);
+
+      // SCENE 7 COMMANDS 24.62—28.6
+      tl.fromTo("#s7-top-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "expo.out" }, 24.67);
+      tl.fromTo("#s7-eb", { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: "power2.out" }, 24.77);
+      tl.fromTo("#s7-heading", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "expo.out" }, 24.92);
+      tl.fromTo("#s7-grid .cmd-row",
+        { x: -30, opacity: 0 },
+        { x: 0, opacity: 1, duration: 0.42, ease: "power3.out", stagger: 0.06 }, 25.25);
+      tl.fromTo("#s7-bot-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "expo.out" }, 24.85);
+
+      pushTransition("scene7", "scene8", 28.3, 0.42);
+
+      // SCENE 8 DAILY DIGEST 28.72—33
+      tl.fromTo("#s8-top-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "expo.out" }, 28.77);
+      tl.fromTo("#s8-eb", { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: "power2.out" }, 28.87);
+      tl.fromTo("#s8-heading", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "expo.out" }, 29.02);
+      tl.fromTo("#s8-bullets .row",
+        { x: -20, opacity: 0 },
+        { x: 0, opacity: 1, duration: 0.4, ease: "power3.out", stagger: 0.1 }, 29.35);
+      tl.fromTo("#s8-frame",
+        { x: 80, opacity: 0, scale: 0.94 },
+        { x: 0, opacity: 1, scale: 1, duration: 0.7, ease: "expo.out" }, 29.45);
+      tl.fromTo("#s8-frame .digest-bubble-line",
+        { y: 12, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.32, ease: "power2.out", stagger: 0.07 }, 30.0);
+      tl.fromTo("#s8-bot-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "expo.out" }, 28.95);
+
+      blurFade("scene8", "scene9", 32.7, 0.55);
+
+      // SCENE 9 CTA 33.25—38 (FINAL — exits allowed)
+      tl.fromTo("#s9-eb", { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: "power2.out" }, 33.32);
+      tl.fromTo("#s9-h1",
+        { y: 80, opacity: 0, scale: 0.96 },
+        { y: 0, opacity: 1, scale: 1, duration: 0.7, ease: "expo.out" }, 33.45);
+      tl.fromTo("#s9-h2",
+        { y: 80, opacity: 0, scale: 0.96 },
+        { y: 0, opacity: 1, scale: 1, duration: 0.7, ease: "expo.out" }, 33.6);
+      tl.fromTo("#s9-url-web",
+        { y: 24, opacity: 0, scale: 0.94 },
+        { y: 0, opacity: 1, scale: 1, duration: 0.55, ease: "back.out(1.5)" }, 33.95);
+      tl.fromTo("#s9-url-tg",
+        { y: 24, opacity: 0, scale: 0.94 },
+        { y: 0, opacity: 1, scale: 1, duration: 0.55, ease: "back.out(1.5)" }, 34.1);
+      tl.fromTo("#s9-stamp", { y: 12, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: "power2.out" }, 34.4);
+      tl.to("#s9-glow",
+        { scale: 1.12, duration: 2.0, ease: "sine.inOut", yoyo: true, repeat: 1, transformOrigin: "50% 50%" }, 33.5);
+      tl.to("#s9-url-web",
+        { boxShadow: "0 0 120px rgba(245, 166, 74, 0.55)", duration: 1.2, ease: "sine.inOut", yoyo: true, repeat: 1 }, 34.6);
+
+      tl.to("#scene9", { opacity: 0, duration: 0.6, ease: "power2.in" }, 37.35);
+      tl.set("#scene9", { visibility: "hidden" }, 37.95);
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

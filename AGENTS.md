@@ -30,10 +30,21 @@ backend/
   routes/jobs.py           # POST /jobs, GET /jobs/{job_id}
   routes/chat.py
   routes/analysis.py       # compare/merge endpoints
+  routes/admin.py          # admin analytics + monitoring
   routes/history.py        # stale/unused route
+  routes/telegram.py       # POST /telegram/webhook + GET /telegram/set-webhook (V1→V4)
+  routes/cron.py           # POST /cron/digest — header-secret guarded scheduler entry
   services/assemblyai_service.py  # transcription via AssemblyAI (current engine)
   services/groq_service.py        # summaries, chat, compare/merge, fallback infer_speakers, _build_speaker_transcript helper
   services/supabase_service.py
+  services/analytics_service.py
+  services/admin_service.py
+  services/telegram_service.py     # bot client, send_message, edit_message_text, send_document, format_result_reply, format_actions_reply, build_ics, help/welcome text, urgent badge
+  services/actions_service.py      # V3 extract_actions (second LLM pass) + action_items CRUD + mark_urgent_for_transcript
+  services/digest_service.py       # V4 build_today_digest, save/get_cached_digest, should_send_now, parse_digest_time, telegram_chat_prefs helpers
+  services/productivity_service.py # V4 compute_score (with insufficient_data + work_recordings)
+  services/topic_analysis_service.py # V4 LLM extract_topics, refresh_topic_window, recurring_themes, latest_people
+  services/reminder_service.py     # scaffold only (planned cron-pushed reminders)
   models/schemas.py
   requirements.txt
   runtime.txt
@@ -455,3 +466,128 @@ git diff --check
 5. Run a fresh transcription. Confirm Render logs print `[Analytics] inserted id=... total_rows_now=N` and `[Monitoring] updated provider=...`.
 6. To diagnose later, curl: `curl -H "Authorization: Bearer <JWT>" https://audio-transcriber-summariser.onrender.com/admin/analytics | python -m json.tool`. The `source` field tells you the served path: `analytics_events` (healthy), `transcripts_fallback` (migration not yet run, but UI still shows real numbers), `empty` (no transcripts at all).
 7. Same curl with `/admin/api-monitoring` for the API monitoring tab. Want `source == "api_usage_events"` post-migration.
+
+### Telegram Bot Integration (V1)
+- Goal: turn the existing web-app pipeline into a Telegram AI assistant. Users open the bot, send voice / audio / call / meeting recording, get back transcript + summary + key points + inline action buttons. **No frontend / admin / credits changes.**
+- **NEW** `backend/services/telegram_service.py` — bot client built on `httpx` (no `aiogram` / `python-telegram-bot`); lazy token check (boots without `TELEGRAM_BOT_TOKEN`, only `/telegram/webhook` fails closed), `download_file(file_id)`, `send_message`, `edit_message_text`, `answer_callback_query`, `send_chat_action`, `send_document`, `set_webhook`, helpers `format_result_reply`, `format_duration`, `welcome_text`, `is_email`, `_html_escape`.
+- **NEW** `backend/routes/telegram.py` registers `POST /telegram/webhook` (always returns 200 so Telegram doesn't retry-storm) and `GET /telegram/set-webhook?url=...`. Handles `voice`, `audio`, `video_note`, `document` (audio mime). Reuses `process_audio_file` from `routes/process.py` — no duplicated pipeline.
+- Persistence: synthetic per-chat `user_id = uuid5(NAMESPACE_DNS, "telegram:<chat_id>")` so every chat maps to a stable bucket in the existing `transcripts` table. Rows are filed under audio_name `voice_<message_id>.ogg` / `audio_*` etc.
+- Analytics tag `provider_used = "telegram+<assemblyai|groq_whisper>"` — admin Analytics page surfaces the Telegram channel without any schema change.
+- Buttons (V1): `[PDF]` `[Email me]` `[Translate]` `[Ask Questions]`. Callback scheme `pdf:<id>`, `email:<id>`, `translate:<id>`, `ask:<id>`.
+- PDF generation server-side via `reportlab` (jsPDF is frontend-only). Each PDF render is independent — no disk cache (Render free has ephemeral FS).
+- Email via SMTP initially (Gmail STARTTLS / SSL configurable). Per-chat in-memory `_AWAITING_EMAIL[chat_id] = record_id`; next plain-text from same chat is captured as the destination address. Optional vars; falls through to "Email not configured" without them.
+- Ask Mode via in-memory `_ASK_MODE[chat_id] = record_id`; routes the next text message to existing `chat_with_audio`. Single-turn for now (no message history).
+- File-ext normalisation: Telegram-native `.ogg` voice notes and `.mp4` / `.webm` video notes are renamed to `.m4a` for `process_audio_file`'s extension gate — providers sniff content, suffix is cosmetic.
+- New deps: `httpx==0.27.2`, `reportlab==4.2.5`. New env: `TELEGRAM_BOT_TOKEN` (required). Optional SMTP: `SMTP_HOST` `SMTP_PORT` `SMTP_USER` `SMTP_PASSWORD` `SMTP_FROM` `SMTP_USE_SSL`.
+- Manual one-time: register webhook via `GET https://.../telegram/set-webhook?url=https://.../telegram/webhook`. Browser GET shows `{ok: true, telegram_response: {...}}`. Hitting `/telegram/webhook` directly in a browser shows `Method Not Allowed` — this is correct (endpoint is POST-only).
+
+### Render SMTP block → switch to Resend HTTP API
+- Symptom: `[Telegram] SMTP send failed` traceback in Render logs ending `OSError: [Errno 101] Network is unreachable` on `socket.create_connection` to `smtp.gmail.com:587`.
+- Root cause: Render free tier blocks outbound TCP on SMTP ports 25 / 465 / 587. Gmail SMTP can never succeed from a Render service.
+- Fix: `_send_summary_email` now prefers `RESEND_API_KEY` over SMTP. New helper `_send_via_resend(to_addr, subject, body, api_key)` POSTs to `https://api.resend.com/emails` with the existing `httpx` async client. SMTP path is kept as a fallback for dev / non-Render hosts that aren't blocked.
+- `_email_configured()` returns true when EITHER `RESEND_API_KEY + EMAIL_FROM` are set OR the full SMTP quintet is set. `_smtp_configured()` is a backward-compat alias.
+- New env (recommended): `RESEND_API_KEY`, `EMAIL_FROM`. Without a verified Resend domain, `EMAIL_FROM=onboarding@resend.dev` only delivers to the Resend account owner's signup email — verify a domain to send anywhere.
+- Vercel app domains (`*.vercel.app`) cannot be used as Resend senders — Vercel owns the DNS; you can't add SPF/DKIM records there.
+
+### Custom exit command (`/exit`)
+- Added `/exit` (also `/cancel`, `/stop`) to leave ask-mode / email-collection mode. Previously the only escape was `/start`, which also re-printed the welcome screen.
+- Updated ask-mode entry prompt to reference `/exit` instead of `/start`.
+
+### V3 AI Actions + Productivity Layer
+- Goal: move from `Audio → Transcript → Summary` to `Audio → Transcript → Summary → Detect Tasks → Suggest Actions`. A second LLM pass extracts structured `{tasks, people, dates, deadlines, events}`, persists into a new `action_items` table, and surfaces in the Telegram reply.
+- **NEW** `backend/services/actions_service.py`:
+  - `extract_actions(transcript, summary, language)` — strict-JSON Groq Llama pass via `_llama_complete` (so 70B → 8B fallback applies). System prompt forbids markdown / prose. `_safe_parse_json` and `_normalise_extraction` produce the canonical 5-key dict even on LLM / parse failure (returns empty lists, never raises).
+  - `save_action_items(user_id, transcript_id, extracted)` → bulk insert, returns inserted IDs.
+  - `list_action_items(user_id, status, limit)`, `list_action_items_for_transcript(transcript_id)`.
+  - `mark_action_done(id)`, `mark_action_dismissed(id)`, `mark_transcript_actions_status(transcript_id, new_status)` for bulk ops from the Done / Dismiss buttons.
+  - `mark_urgent_for_transcript(transcript_id, transcript_text)` — scans saved action_items + transcript text for urgency keywords (today, tomorrow, urgent, asap, deadline, eod, right now, immediately) and flips matching rows to `priority='urgent'`. If the transcript itself contains an urgency keyword, ALL pending items for that transcript are flagged.
+  - Fail-soft: `_warn_table_missing(exc)` emits a one-time loud log on `42P01` (table missing → run migration) or `42501` (RLS / role denied → set `SUPABASE_SERVICE_ROLE_KEY`) then quietly fails-soft.
+- **NEW** `backend/services/reminder_service.py` — scaffold only. Stubs `schedule_reminder`, `cancel_reminder`, `due_reminders`, `notify_due`. Module docstring outlines the planned `/cron/reminders` HTTP-cron entry point. Not wired into the request flow yet.
+- **NEW** `docs/supabase_action_items_migration.sql` — `action_items` table with `id, user_id, transcript_id (FK ON DELETE CASCADE), title, description, person, due_date, due_time, status DEFAULT 'pending', priority DEFAULT 'normal', created_at`; indexes `(user_id, status)` and `(transcript_id)`. RLS DISABLED (matches house style).
+- **EXTEND** `backend/routes/telegram.py`:
+  - After `process_audio_file` returns, runs `actions_service.extract_actions(...)` and `save_action_items(...)` then `mark_urgent_for_transcript(...)`. Each step is independently try/except wrapped — extraction failure never kills the summary reply.
+  - New reply via `telegram_service.format_actions_reply(result, extracted)` — same Summary section, then **Action Items** (urgent ones rendered with `🔴` prefix via `_is_urgent_text`), then **Detected People / Dates / Deadlines / Events** sections (only rendered when they have content).
+  - New button rows via `result_action_buttons_with_actions(record_id)`:
+    - Row 1: `[✅ Done]` `[📅 Calendar]`
+    - Row 2: `[📧 Email]` `[🌐 Translate]`
+    - Row 3: `[💬 Ask]` `[❌ Dismiss]`
+    - Callback scheme adds `cal:<id>`, `action:done:<id>`, `action:dismiss:<id>` alongside existing `pdf | email | translate | ask`.
+  - `cal:<id>` builds an `.ics` via `telegram_service.build_ics` (RFC 5545, stdlib only — no `icalendar` dep) containing one VEVENT per task with a `due_date`. Sent via `send_document`. If no dated tasks → friendly "No dated tasks to add to calendar." reply.
+  - `action:done` and `action:dismiss` call `mark_transcript_actions_status(record_id, new_status)`; reply with `✅ All tasks marked done.` / `❌ Tasks dismissed.` footer.
+  - New text commands: `/tasks` and `/pending` and `/completed` → numbered task list (max 25) via `_send_action_list`; `/help` → command index.
+- `telegram_service` additions: `format_actions_reply`, `result_action_buttons_with_actions`, `build_ics`, `help_text`, `_is_urgent_text`, urgent-keyword tuple.
+
+### V4 Daily Intelligence / AI Secretary
+- Goal: turn the bot into an AI secretary. Auto-extracts recurring themes + important people + productivity score across a rolling 7-day window. Ships a daily HTML digest in user-local timezone via HTTP cron.
+- **NEW** `backend/services/productivity_service.py` — pure helpers, no LLM:
+  - `compute_score(user_id, since, until)` reads `transcripts` + `action_items`; returns `{recordings, work_recordings, total_seconds, tasks_total, tasks_done, tasks_pending, tasks_dismissed, completion_pct, score, insufficient_data}`. Score formula `0.6 * completion_pct + 0.4 * min(100, work_recordings * 12)`. `work_recordings` excludes `audio_type IN ('music_song', 'empty_audio')`.
+  - `insufficient_data == True` when `tasks_total == 0 AND work_recordings == 0`; in that state `score` and `completion_pct` are `None` (renderers show "Not enough work-related data yet" instead of "0 / 100").
+  - `format_duration(seconds)` → `"2h 14m"` / `"42m"` / `"18s"`.
+  - Fail-soft: every DB error returns the zero-shape so the digest still ships.
+- **NEW** `backend/services/topic_analysis_service.py`:
+  - `extract_topics(transcripts, top_k)` — single Llama pass over concatenated summaries (each truncated to 400 chars, total prompt capped near 6000 chars). Strict JSON returning `{topics: [{label, mentions}], people: [{name, mentions}]}`. Defensive parse.
+  - `refresh_topic_window(user_id, days=7)` reads last-N-day transcripts, calls `extract_topics`, REPLACES the user's rows in `topic_stats` + `people_stats` for the current `(window_start, window_end=today)` window.
+  - `recurring_themes(user_id, days=7, min_mentions=3)` reads cached topic_stats; `latest_people(user_id, limit=8)` reads people_stats.
+- **NEW** `backend/services/digest_service.py` — orchestrator:
+  - `build_today_digest(user_id, chat_id, tz_name="UTC")` returns `{summary_text: "<HTML>", metadata: {date, recordings (count), recordings_list: [{id, audio_name, duration_seconds}], total_seconds, topics, people, pending_tasks, deadlines, languages, productivity}}`.
+  - Day window = midnight-to-now in user's TZ via `zoneinfo.ZoneInfo(tz_name)`; falls back to UTC on invalid TZ.
+  - Pending tasks sorted urgent-first then by recency. Deadlines = pending tasks with `due_date >= today_local`.
+  - `_render_digest_html(...)` builds HTML safely escaped. Productivity block honors `insufficient_data`. Recording filenames are NO LONGER bulleted in the body — they're delivered as interactive cards (see V4.2 below).
+  - `save_digest`, `get_cached_digest(user_id, today)` — upsert / read `daily_digest` keyed `(user_id, digest_date)`.
+  - `should_send_now(prefs_row, now_utc)` — true when, in user's TZ, current minute is within ±7 of `(digest_hour:digest_minute)` AND `last_digest_sent_at` is not today (in user's local date).
+  - `parse_digest_time(raw)` handles `8pm`, `8:30pm`, `20:00`, compact `2000` / `0830`, bare hour `20`. `format_digest_time(hour, minute)` renders `"8:00 PM"`.
+  - Telegram-chat-prefs helpers: `upsert_chat_prefs`, `get_chat_prefs`, `set_timezone`, `set_digest_enabled`, `set_digest_time`, `mark_digest_sent`, `list_enabled_prefs`. All fail-soft with one-time warning log on table-missing.
+- **NEW** `backend/routes/cron.py` — `POST /cron/digest` guarded by `X-Cron-Secret` header against `CRON_SECRET` env var (returns 503 if env missing, 401 if header mismatch). Iterates `telegram_chat_prefs.digest_enabled = true`; for each chat that passes `should_send_now`: builds digest → saves to `daily_digest` → `send_message(summary_text)` → sends interactive recording cards → `mark_digest_sent`. Per-row try / except; returns `{ok, sent, skipped, errors}`.
+- **NEW** `docs/supabase_v4_intelligence_migration.sql` — creates `telegram_chat_prefs (chat_id PK, user_id, timezone, digest_enabled, digest_hour, last_digest_sent_at, created_at, updated_at)`, `daily_digest (id, user_id, digest_date, summary, metadata JSONB, UNIQUE(user_id, digest_date))`, `topic_stats`, `people_stats`. Adds `priority TEXT DEFAULT 'normal'` to `action_items`. RLS DISABLED on all four.
+- **NEW** `docs/supabase_v4_digest_minute_migration.sql` — V4.1: adds `digest_minute SMALLINT DEFAULT 0` to `telegram_chat_prefs`.
+- **EXTEND** `backend/routes/telegram.py`:
+  - First-touch hook in `_dispatch_update`: best-effort `digest_service.upsert_chat_prefs(chat_id, _chat_user_id(chat_id))` on every incoming message.
+  - New text commands: `/digest`, `/stats`, `/topics`, `/people`, `/timezone <TZ>`, `/digest_on [time]`, `/digest_off`, `/digest_time <time>`, `/help` (extended).
+  - `/digest` reuses today's cached digest if present, otherwise builds live + caches. Sends summary message, then per-recording interactive cards.
+  - `/stats` shows productivity + recordings + audio duration + the user's current daily-digest setting line.
+  - `/topics` calls `refresh_topic_window` then `recurring_themes` (8 max) for the user.
+  - `/people` same pattern with `latest_people` (8 max).
+  - `/timezone Asia/Kolkata` validates via `ZoneInfo` and persists; `/timezone` alone shows current.
+  - `/digest_on 20:00`, `/digest_on 8pm`, `/digest_on 8:30pm` — `parse_digest_time` handles all forms. Reply: `Daily digest enabled for 8:00 PM Asia/Kolkata`.
+  - `/digest_time 21:15` — same parser, sets time without toggling enable state.
+  - `/digest_off` — flips `digest_enabled = false`.
+- New env: `CRON_SECRET` (required for cron endpoint). cron-job.org config: method POST, header `X-Cron-Secret: <secret>`, schedule every 15 min.
+
+### V4.2 — Interactive digest cards + smarter productivity
+- After today's digest summary message, the bot now sends one `audio-name` card per recording with inline buttons `[Summary] [Transcript] [PDF]`. Lets users revisit old recordings without scrolling chat history.
+- New callbacks: `dsum:<id>` (stored summary, no LLM call), `dtx:<id>:<page>` (transcript paginated at 3500 chars / page with `Prev` / `Next` — uses `edit_message_text` so the same message updates rather than spawning new ones), `dpdf:<id>` (reuses `_action_pdf` — generated from DB, no transcription / no LLM).
+- Each callback calls `_fetch_record_by_id` against `transcripts`; "no longer available" / "no summary stored" friendly fallbacks if a row is missing or empty.
+- Cron digest run (`/cron/digest`) also emits the per-recording cards by importing `_send_digest_recording_cards` lazily from `routes.telegram` and reading `metadata.recordings_list`.
+- `_send_digest_recording_cards` and `_action_digest_*` helpers live in `routes/telegram.py`.
+- Productivity logic in `productivity_service.compute_score` now flags `insufficient_data` (see service block above). `/stats` and `_render_digest_html` render `Productivity: Not enough work-related data yet` when true; otherwise show the real score + completion %. Eliminates the previous misleading `29 / 100 — 0 done, 0 pending (0 % completion)` output for music-only / casual chat / first-time users.
+- `digest_service.metadata.recordings_list` is the new contract; downstream consumers (Telegram cards, cron) read from it. `_render_digest_html` no longer bullet-lists filenames in the body (cards do that visually).
+
+### Hyperframes promo videos
+- Two compositions scaffolded under `video/`:
+  - `video/my-video/` — 26.5s explainer covering the web flow only (Hook → Drop → AI → Results → Extras → CTA).
+  - `video/app-and-bot-v1/` — 38s 9-scene explainer covering BOTH the web app AND the Telegram bot (Hook → Two Channels → Web Drop → Web Results → Telegram Send → Telegram Reply → Commands → Daily Digest → CTA).
+- Shared palette: dark `#0e1014` canvas, amber accent `#f5a64a`, sage secondary `#7ea88c`, warm-off-white fg `#f4ede0`. Display font Bricolage Grotesque (800 vs italic-300), mono register JetBrains Mono. 1920x1080.
+- Both projects pass `hyperframes lint` with 0 errors and `hyperframes inspect` clean. Remaining `validate` contrast warnings are sampler false positives on dark-text-inside-amber-chips (CTA URL card, active tab, active stage check) — verified visually.
+- Render command: `cd video\app-and-bot-v1; npm run render` (PowerShell — no `&&`).
+
+### Pending verification (V3 / V4 deploy)
+1. Run `docs/supabase_action_items_migration.sql` (V3 action_items table).
+2. Run `docs/supabase_v4_intelligence_migration.sql` (V4 telegram_chat_prefs, daily_digest, topic_stats, people_stats; adds `priority` to action_items).
+3. Run `docs/supabase_v4_digest_minute_migration.sql` (V4.1 digest_minute column).
+4. Render env: set `CRON_SECRET` (any 32+ char random string). Optional: `RESEND_API_KEY`, `EMAIL_FROM` for the email button.
+5. Deploy backend.
+6. cron-job.org → new job, POST `https://audio-transcriber-summariser.onrender.com/cron/digest`, header `X-Cron-Secret: <secret>`, schedule every 15 min.
+7. Telegram smoke test: `/start` → `/timezone Asia/Kolkata` → `/digest_on 8pm` → send a multi-speaker meeting clip → confirm reply has Action Items + Detected sections + 6 buttons + urgent badge on time-sensitive items → `/tasks` lists them → tap Calendar → `.ics` arrives → `/digest` after a few clips → expect summary + per-recording cards each with `[Summary][Transcript][PDF]` → tap Transcript → page through with Next.
+
+### Gotchas added this session
+- Render free tier blocks outbound SMTP (25 / 465 / 587). Always prefer HTTP email providers (Resend / SendGrid / Postmark) on Render.
+- `*.vercel.app` and other shared subdomains can't be Resend senders — domain ownership is required for SPF / DKIM. Use Resend sandbox `onboarding@resend.dev` for personal-account testing, or buy a cheap domain for production.
+- `/telegram/set-webhook?url=...` is GET (browser-friendly); `/telegram/webhook` is POST-only (returns `Method Not Allowed` if opened in a browser — this is correct, not a bug).
+- Telegram bot uploads are capped at **20 MB** by the Bot API, not the 25 MB the web app accepts. Larger clips should be told to use the web app.
+- The `dtx:<id>:<page>` callback is parsed specially in `_handle_callback` because it has 3 colon-separated parts; all other callbacks are 2-part `prefix:record_id`.
+- `_ASK_MODE` and `_AWAITING_EMAIL` are process-local dicts. A Render restart wipes them — the user just re-clicks the button. Intentional (no DB churn for transient UI state).
+- `action_items.priority` defaults to `'normal'`; only `'urgent'` is set by `mark_urgent_for_transcript`. The V3 → V4 migration adds this column.
+- `topic_stats` / `people_stats` are REPLACED per window — not appended. `refresh_topic_window` deletes the user's rows where `window_end = today` before inserting new ones.
+- `should_send_now` uses a ±7-minute window because cron fires every 15 minutes; this catches every slot exactly once without double-sending.
+- The `insufficient_data` path in productivity is checked in TWO places: `_render_digest_html` and `_send_stats`. Both must stay in sync if the score shape changes.
+- PowerShell 5.1 does NOT support `&&` between commands — use `;` or two separate calls (`cd video\app-and-bot-v1; npm run render`).
