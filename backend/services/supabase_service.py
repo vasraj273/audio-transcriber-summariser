@@ -56,6 +56,7 @@ def mark_transcript_processing(job_id: str) -> None:
 
 
 def complete_transcript(job_id: str, result: dict) -> None:
+    sales_analysis = result.get("sales_analysis")
     payload = {
         "status": "completed",
         "transcript": result.get("transcript", ""),
@@ -72,13 +73,15 @@ def complete_transcript(job_id: str, result: dict) -> None:
         "error_message": result.get("warning", ""),
         "transcription_provider": result.get("transcription_provider") or "unknown",
         "processing_ms": result.get("processing_ms"),
+        "sales_analysis": json.dumps(sales_analysis) if sales_analysis else None,
     }
     try:
         _update_by_job(job_id, payload)
     except Exception:
-        # Fallback for environments where supabase_analytics_migration.sql has not been run yet.
+        # Fallback for environments where the latest migrations have not been run yet.
         payload.pop("transcription_provider", None)
         payload.pop("processing_ms", None)
+        payload.pop("sales_analysis", None)
         _update_by_job(job_id, payload)
     print(f"[Analytics] record updated job_id={job_id} provider={payload.get('transcription_provider')}")
 
@@ -173,6 +176,7 @@ def _normalise_record(record: dict) -> dict:
     normalised["key_points"] = _json_or_default(record.get("key_points"), [])
     normalised["quality_flags"] = _json_or_default(record.get("quality_flags"), [])
     normalised["transcript_segments"] = _json_or_default(record.get("transcript_segments"), [])
+    normalised["sales_analysis"] = _json_or_default(record.get("sales_analysis"), None)
     normalised["status"] = record.get("status") or "completed"
     normalised["speaker_count"] = record.get("speaker_count") or 1
     normalised["quality_score"] = record.get("quality_score") or 0

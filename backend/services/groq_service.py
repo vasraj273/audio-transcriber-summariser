@@ -634,6 +634,174 @@ FULL TRANSCRIPT:
     return _llama_complete(messages, temperature=0.4).strip()
 
 
+def analyze_sales_call(transcript: str, speaker_transcript: str = "") -> dict:
+    """Sales intelligence extraction. Runs after summary in the existing
+    pipeline. Returns structured JSON: customer info, pain points, budget,
+    sentiment, objections, next action, follow-up date, lead score, tasks,
+    coaching insights. Soft-fails to a safe default on parse/LLM error so
+    a bad analysis never blocks transcript+summary delivery."""
+    source = (speaker_transcript or transcript or "").strip()
+    if not source:
+        return _default_sales_analysis()
+
+    prompt = f"""You are a senior sales intelligence analyst. Read the sales call transcript below and extract structured JSON.
+
+Transcript:
+\"\"\"
+{source[:12000]}
+\"\"\"
+
+Return ONLY a single JSON object — no prose, no markdown fences. Use this exact schema:
+
+{{
+  "customerName": "<full name if mentioned, else empty>",
+  "company": "<company name if mentioned, else empty>",
+  "painPoints": ["<short bullet>", "..."],
+  "budget": "<budget figure or qualitative note, else empty>",
+  "urgency": "<low | medium | high | unknown>",
+  "timeline": "<when customer wants to act, else empty>",
+  "competitors": ["<name>", "..."],
+  "sentiment": "<positive | neutral | negative>",
+  "objections": ["<short objection>", "..."],
+  "requirements": ["<short requirement>", "..."],
+  "nextAction": "<what the salesperson should do next>",
+  "meetingDate": "<ISO date if explicitly mentioned, else empty>",
+  "followupDate": "<ISO date if explicitly mentioned, else empty>",
+  "tasks": [
+    {{"type": "<call | meeting | proposal | email | other>", "description": "<short>", "dueDate": "<ISO date or empty>"}}
+  ],
+  "leadScore": <integer 0-100>,
+  "leadTemperature": "<cold | warm | hot>",
+  "coaching": {{
+    "strengths": ["<short>", "..."],
+    "weaknesses": ["<short>", "..."],
+    "suggestions": ["<short>", "..."]
+  }}
+}}
+
+Rules:
+- Use only facts from the transcript. Do not invent names, dates, or numbers.
+- For unknown fields, use empty string or empty array — never null.
+- leadScore must use these rules: meeting booked +30, positive sentiment +20, budget discussed +20, urgent requirement +20, negative sentiment -10. Clamp 0-100.
+- leadTemperature: 0-30 cold, 31-70 warm, 71-100 hot.
+- tasks: detect phrases like "send proposal", "call Friday", "schedule meeting" and emit one task each.
+"""
+
+    try:
+        raw = _llama_complete([{"role": "user", "content": prompt}], temperature=0.2)
+    except Exception as exc:
+        logger.warning("analyze_sales_call LLM call failed (%s); returning default analysis.", exc)
+        return _default_sales_analysis()
+
+    parsed = _safe_extract_json_object(raw)
+    if not parsed:
+        logger.warning("analyze_sales_call returned unparseable JSON; using default.")
+        return _default_sales_analysis()
+
+    return _normalize_sales_analysis(parsed)
+
+
+def _default_sales_analysis() -> dict:
+    return {
+        "customerName": "",
+        "company": "",
+        "painPoints": [],
+        "budget": "",
+        "urgency": "unknown",
+        "timeline": "",
+        "competitors": [],
+        "sentiment": "neutral",
+        "objections": [],
+        "requirements": [],
+        "nextAction": "",
+        "meetingDate": "",
+        "followupDate": "",
+        "tasks": [],
+        "leadScore": 0,
+        "leadTemperature": "cold",
+        "coaching": {"strengths": [], "weaknesses": [], "suggestions": []},
+    }
+
+
+def _normalize_sales_analysis(raw: dict) -> dict:
+    default = _default_sales_analysis()
+    out = {**default}
+
+    for key in ("customerName", "company", "budget", "timeline", "nextAction", "meetingDate", "followupDate"):
+        value = raw.get(key)
+        if isinstance(value, str):
+            out[key] = value.strip()
+
+    for key in ("painPoints", "competitors", "objections", "requirements"):
+        value = raw.get(key)
+        if isinstance(value, list):
+            out[key] = [str(item).strip() for item in value if str(item).strip()]
+
+    urgency = str(raw.get("urgency", "")).strip().lower()
+    out["urgency"] = urgency if urgency in {"low", "medium", "high", "unknown"} else "unknown"
+
+    sentiment = str(raw.get("sentiment", "")).strip().lower()
+    out["sentiment"] = sentiment if sentiment in {"positive", "neutral", "negative"} else "neutral"
+
+    tasks = raw.get("tasks")
+    if isinstance(tasks, list):
+        normalized_tasks = []
+        for item in tasks:
+            if not isinstance(item, dict):
+                continue
+            task_type = str(item.get("type", "other")).strip().lower()
+            if task_type not in {"call", "meeting", "proposal", "email", "other"}:
+                task_type = "other"
+            description = str(item.get("description", "")).strip()
+            if not description:
+                continue
+            due_date = str(item.get("dueDate", "")).strip()
+            normalized_tasks.append({"type": task_type, "description": description, "dueDate": due_date})
+        out["tasks"] = normalized_tasks
+
+    try:
+        score = int(raw.get("leadScore", 0))
+    except (TypeError, ValueError):
+        score = 0
+    out["leadScore"] = max(0, min(100, score))
+
+    if out["leadScore"] <= 30:
+        out["leadTemperature"] = "cold"
+    elif out["leadScore"] <= 70:
+        out["leadTemperature"] = "warm"
+    else:
+        out["leadTemperature"] = "hot"
+
+    coaching = raw.get("coaching")
+    if isinstance(coaching, dict):
+        normalized_coaching = {"strengths": [], "weaknesses": [], "suggestions": []}
+        for key in normalized_coaching:
+            value = coaching.get(key)
+            if isinstance(value, list):
+                normalized_coaching[key] = [str(item).strip() for item in value if str(item).strip()]
+        out["coaching"] = normalized_coaching
+
+    return out
+
+
+def _safe_extract_json_object(raw: str) -> dict | None:
+    if not raw:
+        return None
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z0-9]*\n?", "", text)
+        text = re.sub(r"\n?```$", "", text)
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    try:
+        data = json.loads(text[start : end + 1])
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def _parse_llm_response(raw: str) -> dict:
     summary = ""
     key_points = []

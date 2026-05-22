@@ -7,9 +7,11 @@ import Dashboard from "./pages/Dashboard";
 import HistoryPage from "./pages/HistoryPage";
 import UsagePage from "./pages/UsagePage";
 import AdminPage from "./pages/AdminPage";
+import SalesAssistantPage from "./pages/SalesAssistantPage";
 import { ProcessingJobsProvider } from "./context/ProcessingJobsContext";
 import { CreditsProvider } from "./context/CreditsContext";
 import { AdminProvider } from "./context/AdminContext";
+import { ThemeProvider } from "./context/ThemeContext";
 
 export default function App() {
   const [session, setSession] = useState(undefined);
@@ -38,6 +40,7 @@ export default function App() {
   }
 
   return (
+    <ThemeProvider>
     <BrowserRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
       <CreditsProvider userId={session?.user?.id}>
         <AdminProvider userId={session?.user?.id}>
@@ -56,6 +59,15 @@ export default function App() {
             element={session ? <HistoryPage session={session} /> : <Navigate to="/" />}
           />
           <Route
+            path="/sales-assistant/*"
+            element={session ? <SalesAssistantPage session={session} /> : <Navigate to="/" />}
+          />
+          <Route path="/leads" element={<Navigate to="/sales-assistant/leads" replace />} />
+          <Route path="/tasks" element={<Navigate to="/sales-assistant/tasks" replace />} />
+          <Route path="/kpi" element={<Navigate to="/sales-assistant/kpi" replace />} />
+          <Route path="/okr" element={<Navigate to="/sales-assistant/okr" replace />} />
+          <Route path="/analytics" element={<Navigate to="/sales-assistant" replace />} />
+          <Route
             path="/usage"
             element={session ? <UsagePage session={session} /> : <Navigate to="/" />}
           />
@@ -68,5 +80,6 @@ export default function App() {
         </AdminProvider>
       </CreditsProvider>
     </BrowserRouter>
+    </ThemeProvider>
   );
 }

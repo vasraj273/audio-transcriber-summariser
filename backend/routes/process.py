@@ -6,6 +6,7 @@ from models.schemas import ProcessResponse
 from services.assemblyai_service import transcribe_audio as assemblyai_transcribe_audio
 from services.groq_service import (
     _build_speaker_transcript,
+    analyze_sales_call,
     assess_transcription_quality,
     infer_speakers,
     languages_match,
@@ -96,6 +97,15 @@ def process_audio_file(file_path: str, options: dict) -> dict:
         target_language=options.get("output_language", "English"),
     )
 
+    sales_analysis = None
+    try:
+        sales_analysis = analyze_sales_call(
+            transcript=transcription.get("text") or "",
+            speaker_transcript=speaker_result.get("speaker_transcript") or "",
+        )
+    except Exception as exc:
+        logger.warning("Sales analysis failed (%s); continuing without it.", exc)
+
     combined_warning = quality["warning"]
     if summary_warning:
         combined_warning = (combined_warning + " " if combined_warning else "") + "Summary unavailable right now. Transcript was saved successfully."
@@ -119,6 +129,7 @@ def process_audio_file(file_path: str, options: dict) -> dict:
         "duration_seconds": transcription.get("duration", 0),
         "transcription_provider": provider,
         "processing_ms": processing_ms,
+        "sales_analysis": sales_analysis,
     }
 
 

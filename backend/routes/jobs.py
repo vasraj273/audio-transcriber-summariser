@@ -180,6 +180,7 @@ def _job_response_from_record(record: dict) -> JobStatusResponse:
         quality_flags=record.get("quality_flags") or [],
         error_message=record.get("error_message") or "",
         warning=record.get("error_message") or "",
+        sales_analysis=record.get("sales_analysis") or None,
     )
 
 

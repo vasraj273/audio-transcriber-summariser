@@ -124,5 +124,6 @@ function normaliseJobResult(status) {
     quality_score: status.quality_score,
     quality_flags: status.quality_flags || [],
     warning: status.warning || status.error_message || "",
+    sales_analysis: status.sales_analysis || null,
   };
 }

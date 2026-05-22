@@ -1,5 +1,5 @@
-from pydantic import BaseModel
-from typing import List, Literal
+from pydantic import BaseModel, Field
+from typing import Any, Dict, List, Literal, Optional
 
 
 class TranscriptSegment(BaseModel):
@@ -7,6 +7,38 @@ class TranscriptSegment(BaseModel):
     end: float
     text: str
     speaker: str = ""
+
+
+class SalesTask(BaseModel):
+    type: str = "other"
+    description: str = ""
+    dueDate: str = ""
+
+
+class SalesCoaching(BaseModel):
+    strengths: List[str] = []
+    weaknesses: List[str] = []
+    suggestions: List[str] = []
+
+
+class SalesAnalysis(BaseModel):
+    customerName: str = ""
+    company: str = ""
+    painPoints: List[str] = []
+    budget: str = ""
+    urgency: str = "unknown"
+    timeline: str = ""
+    competitors: List[str] = []
+    sentiment: str = "neutral"
+    objections: List[str] = []
+    requirements: List[str] = []
+    nextAction: str = ""
+    meetingDate: str = ""
+    followupDate: str = ""
+    tasks: List[SalesTask] = []
+    leadScore: int = 0
+    leadTemperature: str = "cold"
+    coaching: SalesCoaching = Field(default_factory=SalesCoaching)
 
 
 class ProcessResponse(BaseModel):
@@ -22,6 +54,7 @@ class ProcessResponse(BaseModel):
     quality_flags: List[str] = []
     warning: str = ""
     duration_seconds: float = 0.0
+    sales_analysis: Optional[SalesAnalysis] = None
 
 
 class JobCreateResponse(BaseModel):
@@ -48,6 +81,7 @@ class JobStatusResponse(BaseModel):
     error_message: str = ""
     warning: str = ""
     duration_seconds: float = 0.0
+    sales_analysis: Optional[SalesAnalysis] = None
 
 
 class TranscriptAnalysisRequest(BaseModel):
