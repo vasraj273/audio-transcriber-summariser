@@ -51,31 +51,19 @@ export default function SalesSidebar() {
               to={item.to}
               end={item.end}
               className={({ isActive }) =>
-                `group flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors ${
-                  isActive
-                    ? "bg-ink-900 text-white"
-                    : "text-ink-700 hover:bg-ink-50"
-                }`
+                `sidebar-item${isActive ? " is-active" : ""}`
               }
             >
               {({ isActive }) => (
                 <>
-                  <span
-                    className={`grid place-items-center w-8 h-8 rounded-lg border ${
-                      isActive
-                        ? "bg-white/10 border-white/15 text-white"
-                        : "bg-ink-50 border-ink-200 text-ink-600 group-hover:text-ink-900 group-hover:border-ink-300"
-                    }`}
-                  >
+                  <span className="sidebar-icon">
                     <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
                       {item.icon}
                     </svg>
                   </span>
                   <div className="flex flex-col min-w-0">
-                    <span className="text-[13.5px] font-medium leading-tight">{item.label}</span>
-                    <span className={`text-[11px] leading-tight mt-0.5 ${isActive ? "text-white/60" : "text-ink-400"}`}>
-                      {item.desc}
-                    </span>
+                    <span className="sidebar-label">{item.label}</span>
+                    <span className="sidebar-desc">{item.desc}</span>
                   </div>
                 </>
               )}

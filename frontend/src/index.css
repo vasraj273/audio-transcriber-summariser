@@ -300,6 +300,65 @@ textarea:focus {
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
 
+/* ---------- Sidebar nav items (Sales Assistant) ---------- */
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  color: var(--text);
+  transition: background-color 0.15s ease, color 0.15s ease;
+  cursor: pointer;
+}
+.sidebar-item:hover {
+  background-color: var(--surface-2);
+}
+.sidebar-item.is-active {
+  background-color: var(--text);
+  color: var(--surface);
+}
+.sidebar-item.is-active .sidebar-label,
+.sidebar-item.is-active .sidebar-desc {
+  color: var(--surface);
+}
+.sidebar-item.is-active .sidebar-desc {
+  opacity: 0.65;
+}
+.sidebar-item.is-active .sidebar-icon {
+  background-color: color-mix(in srgb, var(--surface) 12%, transparent);
+  border-color: color-mix(in srgb, var(--surface) 15%, transparent);
+  color: var(--surface);
+}
+.sidebar-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background-color: var(--surface-muted);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.sidebar-item:hover .sidebar-icon {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.sidebar-label {
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--text);
+}
+.sidebar-desc {
+  font-size: 11px;
+  line-height: 1.2;
+  margin-top: 2px;
+  color: var(--text-faint);
+}
+
 /* ---------- Entrance ---------- */
 @keyframes rise {
   from { opacity: 0; transform: translateY(6px); }
@@ -334,6 +393,30 @@ textarea:focus {
 }
 .bg-gray-200 {
   background-color: var(--border);
+}
+
+/* Hover variants for legacy components — keep contrast in dark mode. */
+.hover\:bg-gray-50:hover {
+  background-color: var(--surface-2) !important;
+}
+.hover\:bg-gray-100:hover {
+  background-color: var(--surface-2) !important;
+}
+.hover\:bg-white:hover {
+  background-color: var(--surface) !important;
+}
+.hover\:text-gray-900:hover,
+.hover\:text-gray-800:hover,
+.hover\:text-gray-700:hover {
+  color: var(--text) !important;
+}
+.hover\:text-gray-600:hover,
+.hover\:text-gray-500:hover {
+  color: var(--text-muted) !important;
+}
+.hover\:border-gray-300:hover,
+.hover\:border-gray-200:hover {
+  border-color: var(--border-strong) !important;
 }
 
 .rounded-xl { border-radius: 16px; }
@@ -371,6 +454,23 @@ textarea:focus {
 .bg-ink-50 { background-color: var(--bg); }
 .bg-ink-100 { background-color: var(--surface-2); }
 .bg-ink-200 { background-color: var(--border); }
+.hover\:bg-ink-50:hover { background-color: var(--surface-2) !important; }
+.hover\:bg-ink-50\/70:hover { background-color: var(--surface-2) !important; }
+.hover\:bg-ink-100:hover { background-color: var(--surface-2) !important; }
+.hover\:text-ink-900:hover,
+.hover\:text-ink-800:hover { color: var(--text) !important; }
+.hover\:border-ink-300:hover { border-color: var(--border-strong) !important; }
+.ring-ink-200 { --tw-ring-color: var(--border); }
+
+/* bg-ink-50 used as table header / page bg / icon bubble across pages.
+   In light mode it should remain near-white surface; in dark mode it
+   should equal the page background so cards still pop. */
+[data-theme="dark"] .bg-ink-50 { background-color: var(--surface-muted); }
+
+/* bg-ink-900 used as logo/dark badge in light mode. In dark mode invert
+   so the badge stays high contrast. */
+[data-theme="dark"] .bg-ink-900 { background-color: var(--text); color: var(--surface); }
+[data-theme="dark"] .bg-ink-900\/30 { background-color: rgba(248, 250, 252, 0.18); }
 .text-ink-900 { color: var(--text); }
 .text-ink-800 { color: var(--text); }
 .text-ink-700 { color: var(--text); }
