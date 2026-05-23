@@ -34,14 +34,6 @@ const ITEMS = [
       <path d="M18 20V10M12 20V4M6 20V14" strokeLinecap="round" strokeLinejoin="round" />
     ),
   },
-  {
-    to: "/sales-assistant/okr",
-    label: "OKRs",
-    desc: "Objectives",
-    icon: (
-      <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22ZM12 18C8.68629 18 6 15.3137 6 12C6 8.68629 8.68629 6 12 6C15.3137 6 18 8.68629 18 12C18 15.3137 15.3137 18 12 18ZM12 14C13.1046 14 14 13.1046 14 12C14 10.8954 13.1046 10 12 10C10.8954 10 10 10.8954 10 12C10 13.1046 10.8954 14 12 14Z" strokeLinecap="round" strokeLinejoin="round" />
-    ),
-  },
 ];
 
 export default function SalesSidebar() {

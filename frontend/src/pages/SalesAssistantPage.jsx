@@ -5,7 +5,6 @@ import AnalyticsPage from "./AnalyticsPage";
 import LeadsPage from "./LeadsPage";
 import TasksPage from "./TasksPage";
 import KPIPage from "./KPIPage";
-import OKRPage from "./OKRPage";
 
 export default function SalesAssistantPage({ session }) {
   return (
@@ -19,7 +18,7 @@ export default function SalesAssistantPage({ session }) {
             <Route path="leads" element={<LeadsPage session={session} embedded />} />
             <Route path="tasks" element={<TasksPage session={session} embedded />} />
             <Route path="kpi" element={<KPIPage session={session} embedded />} />
-            <Route path="okr" element={<OKRPage session={session} embedded />} />
+            <Route path="okr" element={<Navigate to=".." replace />} />
             <Route path="*" element={<Navigate to="." replace />} />
           </Routes>
         </main>

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
-import { fetchKpiSnapshot, fetchObjectives, fetchAllTasks } from "../services/supabase";
+import { fetchKpiSnapshot, fetchAllTasks } from "../services/supabase";
 import { friendlyError } from "../utils/errorMessage";
 
 const FUNNEL_TONE = {
@@ -28,7 +28,6 @@ const KIND_PILL = {
 export default function AnalyticsPage({ session, embedded = false }) {
   const navigate = useNavigate();
   const [snapshot, setSnapshot] = useState(null);
-  const [objectives, setObjectives] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -42,13 +41,11 @@ export default function AnalyticsPage({ session, embedded = false }) {
     try {
       setLoading(true);
       setError(null);
-      const [snap, objs, tks] = await Promise.all([
+      const [snap, tks] = await Promise.all([
         fetchKpiSnapshot({ userId: session.user.id, periodStart: null, periodEnd: null }),
-        fetchObjectives(session.user.id),
         fetchAllTasks(session.user.id),
       ]);
       setSnapshot(snap);
-      setObjectives(objs);
       setTasks(tks);
     } catch (err) {
       setError(friendlyError(err.message));
@@ -114,7 +111,7 @@ export default function AnalyticsPage({ session, embedded = false }) {
       <PageHeader
         eyebrow="Overview"
         title="Analytics"
-        subtitle="All-time intelligence across calls, leads, tasks, and objectives."
+        subtitle="All-time intelligence across calls, leads, and tasks."
         actions={
           <button onClick={load} className="btn btn-secondary">
             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -260,56 +257,8 @@ export default function AnalyticsPage({ session, embedded = false }) {
             </div>
           </div>
 
-          {/* OKR + Top Leads */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6 rise rise-3">
-            <div className="card p-6">
-              <PanelHead
-                title="OKR progress"
-                subtitle="Top objectives at a glance"
-                action={
-                  <button
-                    onClick={() => navigate("/sales-assistant/okr")}
-                    className="btn btn-ghost"
-                  >
-                    Manage
-                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 18l6-6-6-6" />
-                    </svg>
-                  </button>
-                }
-              />
-              {objectives.length === 0 ? (
-                <EmptyMini message="No objectives set." />
-              ) : (
-                <ul className="space-y-4">
-                  {objectives.slice(0, 4).map((obj) => {
-                    const krs = obj.key_results || [];
-                    const avg = krs.length > 0
-                      ? Math.round(krs.reduce((s, k) => s + (k.progress || 0), 0) / krs.length)
-                      : 0;
-                    return (
-                      <li key={obj.id}>
-                        <div className="flex items-baseline justify-between mb-1.5">
-                          <span className="text-[13.5px] text-ink-900 truncate pr-3 font-medium">
-                            {obj.title}
-                          </span>
-                          <span className="num text-[13px] text-brand-600 flex-shrink-0">
-                            {avg}%
-                          </span>
-                        </div>
-                        <div className="h-2 bg-ink-100 rounded-full overflow-hidden">
-                          <div
-                            className={`h-full rounded-full ${avg >= 100 ? "bg-success-500" : avg >= 50 ? "bg-brand-500" : "bg-warning-500"}`}
-                            style={{ width: `${Math.min(100, avg)}%` }}
-                          />
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-
+          {/* Top Leads */}
+          <div className="grid grid-cols-1 mb-6 rise rise-3">
             <div className="card p-6">
               <PanelHead
                 title="Top open leads"

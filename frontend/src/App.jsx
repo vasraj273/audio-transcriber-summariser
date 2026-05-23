@@ -65,7 +65,6 @@ export default function App() {
           <Route path="/leads" element={<Navigate to="/sales-assistant/leads" replace />} />
           <Route path="/tasks" element={<Navigate to="/sales-assistant/tasks" replace />} />
           <Route path="/kpi" element={<Navigate to="/sales-assistant/kpi" replace />} />
-          <Route path="/okr" element={<Navigate to="/sales-assistant/okr" replace />} />
           <Route path="/analytics" element={<Navigate to="/sales-assistant" replace />} />
           <Route
             path="/usage"
