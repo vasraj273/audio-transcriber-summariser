@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { supabase } from "../services/supabase";
 import { useAdmin } from "../context/AdminContext";
@@ -10,15 +11,25 @@ export default function Navbar({ session }) {
   const { theme, toggleTheme } = useTheme();
   const userEmail = session?.user?.email;
   const avatarUrl = session?.user?.user_metadata?.avatar_url;
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // Close mobile menu on route change.
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [location.pathname]);
 
   async function handleLogout() {
     await supabase.auth.signOut();
   }
 
-  function navLink(to, label, matchPrefix = false) {
-    const active = matchPrefix
+  function isActive(to, matchPrefix) {
+    return matchPrefix
       ? location.pathname.startsWith(to)
       : location.pathname === to;
+  }
+
+  function navLink(to, label, matchPrefix = false) {
+    const active = isActive(to, matchPrefix);
     return (
       <Link
         to={to}
@@ -29,6 +40,25 @@ export default function Navbar({ session }) {
         }`}
       >
         {label}
+      </Link>
+    );
+  }
+
+  function mobileLink(to, label, matchPrefix = false) {
+    const active = isActive(to, matchPrefix);
+    return (
+      <Link
+        to={to}
+        className={`flex items-center justify-between px-3 py-2.5 rounded-xl text-[14px] font-medium transition-colors ${
+          active
+            ? "text-ink-900 bg-ink-100"
+            : "text-ink-700 hover:bg-ink-50"
+        }`}
+      >
+        <span>{label}</span>
+        {active && (
+          <span className="w-1.5 h-1.5 rounded-full bg-brand-500" />
+        )}
       </Link>
     );
   }
@@ -60,7 +90,7 @@ export default function Navbar({ session }) {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             <button
               onClick={toggleTheme}
               aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
@@ -102,13 +132,63 @@ export default function Navbar({ session }) {
               </div>
             </div>
             <button
-              onClick={handleLogout}
-              className="md:hidden btn btn-ghost text-[12px]"
+              onClick={() => setMenuOpen((v) => !v)}
+              aria-label={menuOpen ? "Close menu" : "Open menu"}
+              aria-expanded={menuOpen}
+              className="md:hidden grid place-items-center w-9 h-9 rounded-xl border border-ink-200 bg-white text-ink-700 hover:bg-ink-50 transition-colors"
             >
-              Sign out
+              {menuOpen ? (
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              ) : (
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 7h16M4 12h16M4 17h16" />
+                </svg>
+              )}
             </button>
           </div>
         </div>
+
+        {menuOpen && (
+          <div className="md:hidden pb-4 pt-1 border-t border-ink-200 mt-px">
+            {(userEmail || avatarUrl) && (
+              <div className="flex items-center gap-3 px-2 py-3">
+                {avatarUrl && (
+                  <img
+                    src={avatarUrl}
+                    alt="avatar"
+                    className="w-9 h-9 rounded-full ring-1 ring-ink-200"
+                  />
+                )}
+                <div className="flex flex-col leading-tight min-w-0">
+                  <span className="text-[13px] font-semibold text-ink-900 truncate">
+                    {userEmail}
+                  </span>
+                  {isAdmin && (
+                    <span className="text-[11px] text-brand-600 mt-0.5">Admin</span>
+                  )}
+                </div>
+              </div>
+            )}
+            <div className="flex flex-col gap-1 pt-1">
+              {mobileLink("/dashboard", "Transcribe")}
+              {mobileLink("/sales-assistant", "Sales Assistant", true)}
+              {mobileLink("/history", "History")}
+              {mobileLink("/usage", "Usage")}
+              {isAdmin && mobileLink("/admin", "Admin")}
+            </div>
+            <button
+              onClick={handleLogout}
+              className="mt-3 w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-danger-600 hover:bg-danger-50 transition-colors"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12H3m0 0l4-4m-4 4l4 4M21 4v16" />
+              </svg>
+              Sign out
+            </button>
+          </div>
+        )}
       </div>
     </nav>
   );
