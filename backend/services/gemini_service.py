@@ -78,7 +78,24 @@ def _wait_until_active(uploaded, timeout_s: float = 30.0):
     return uploaded
 
 
-def transcribe_audio(file_path: str) -> dict:
+def _build_prompt(context: str = "") -> str:
+    """Prepend a prior-context block when transcribing a later split part, so
+    Gemini keeps speaker labels, names, and terminology consistent across
+    parts. Context is guidance only — never re-transcribed."""
+    if not context.strip():
+        return _PROMPT
+    return (
+        "PRIOR CONTEXT from earlier parts of this SAME recording. Use it ONLY "
+        "to keep speaker labels (Speaker 1/2/...), names, roles, and "
+        "terminology consistent. Do NOT re-transcribe or repeat any of it.\n"
+        "---\n"
+        f"{context.strip()}\n"
+        "---\n\n"
+        + _PROMPT
+    )
+
+
+def transcribe_audio(file_path: str, context: str = "") -> dict:
     _ensure_configured()
 
     started = time.perf_counter()
@@ -94,7 +111,7 @@ def transcribe_audio(file_path: str) -> dict:
 
         model = genai.GenerativeModel(_MODEL)
         response = model.generate_content(
-            [_PROMPT, uploaded],
+            [_build_prompt(context), uploaded],
             generation_config={
                 "temperature": 0.0,
                 "top_p": 0.95,

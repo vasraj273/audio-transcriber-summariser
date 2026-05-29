@@ -3,11 +3,17 @@ import os
 import tempfile
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from models.schemas import ProcessResponse
+from services.audio_split_service import (
+    SPLIT_THRESHOLD_SECONDS,
+    get_duration_seconds,
+    split_into_parts,
+)
 from services.gemini_service import transcribe_audio as gemini_transcribe_audio
 from services.groq_service import (
     _build_speaker_transcript,
     analyze_sales_call,
     assess_transcription_quality,
+    build_context_memory,
     infer_speakers,
     languages_match,
     summarise_transcript,
@@ -134,9 +140,64 @@ def process_audio_file(file_path: str, options: dict) -> dict:
 
 
 def _transcribe_with_fallback(file_path: str) -> dict:
+    """Pipeline entry. Short audio -> single pass. Long audio -> 3 equal
+    sequential parts, each Gemini call primed with a distilled context memo
+    from the prior parts, merged back into one transcription dict. The return
+    shape ({text, language, segments, duration, transcription_provider}) is
+    identical for both paths so downstream code is unaffected."""
     logger.info("Transcription pipeline starting for %s.", os.path.basename(file_path))
+
     try:
-        result = gemini_transcribe_audio(file_path)
+        duration = get_duration_seconds(file_path)
+    except Exception as exc:
+        logger.warning("Duration probe failed (%s); using single-pass.", exc)
+        duration = 0.0
+
+    if duration and duration < SPLIT_THRESHOLD_SECONDS:
+        logger.info(
+            "Audio %.1fs < %.0fs threshold; single-pass transcription.",
+            duration, SPLIT_THRESHOLD_SECONDS,
+        )
+        return _transcribe_part(file_path)
+
+    try:
+        parts = split_into_parts(file_path)
+    except Exception as exc:
+        logger.warning("Audio split failed (%s); falling back to single-pass.", exc)
+        return _transcribe_part(file_path)
+
+    try:
+        return _transcribe_parts_sequential(parts)
+    finally:
+        for part_path in parts:
+            try:
+                os.remove(part_path)
+            except OSError:
+                pass
+
+
+def _transcribe_parts_sequential(parts: list) -> dict:
+    """Transcribe each part in order, propagating a distilled context memo
+    (topic / speakers / terminology / state) from all prior parts into the
+    next part's Gemini prompt."""
+    results = []
+    context = ""
+    for index, part_path in enumerate(parts):
+        logger.info("Transcribing part %d/%d.", index + 1, len(parts))
+        result = _transcribe_part(part_path, context=context)
+        results.append(result)
+        if index < len(parts) - 1:
+            accumulated = " ".join((r.get("text") or "") for r in results).strip()
+            context = build_context_memory(accumulated)
+    return _merge_transcriptions(results)
+
+
+def _transcribe_part(file_path: str, context: str = "") -> dict:
+    """Gemini primary (context-aware) with Groq Whisper fallback for a single
+    file — whole audio or one split part. Groq has no context channel, so a
+    fallback part relies on post-merge speaker inference."""
+    try:
+        result = gemini_transcribe_audio(file_path, context=context)
         if (result.get("text") or "").strip():
             result["transcription_provider"] = "gemini"
             return result
@@ -159,6 +220,58 @@ def _transcribe_with_fallback(file_path: str) -> dict:
         raise RuntimeError(
             f"Transcription failed. Gemini error: {last_error}. Groq Whisper fallback error: {fallback_exc}."
         ) from fallback_exc
+
+
+def _merge_transcriptions(results: list) -> dict:
+    """Concatenate part transcriptions in order. Each later part's segment
+    timestamps restart near 0, so we offset them by the running max end to
+    keep the merged timeline monotonic for the audio player and speaker
+    logic. Preserves the {text, language, segments, duration} schema."""
+    merged_segments = []
+    text_chunks = []
+    providers = []
+    language = "unknown"
+    offset = 0.0
+
+    for result in results:
+        segments = result.get("segments") or []
+        part_max_end = offset
+        for seg in segments:
+            start = float(seg.get("start", 0) or 0) + offset
+            end = float(seg.get("end", start) or start) + offset
+            merged_segments.append({**seg, "start": round(start, 3), "end": round(end, 3)})
+            part_max_end = max(part_max_end, end)
+
+        if (result.get("text") or "").strip():
+            text_chunks.append(result["text"].strip())
+        if language == "unknown" and result.get("language") and result["language"] != "unknown":
+            language = result["language"]
+        if result.get("transcription_provider"):
+            providers.append(result["transcription_provider"])
+
+        # Advance offset by this part's span; if it had no segments, fall back
+        # to its reported duration so the next part still lands after it.
+        if part_max_end > offset:
+            offset = part_max_end
+        else:
+            offset += float(result.get("duration", 0) or 0)
+
+    duration = max((seg["end"] for seg in merged_segments), default=offset)
+    unique_providers = list(dict.fromkeys(providers))
+    if not unique_providers:
+        provider = "unknown"
+    elif len(unique_providers) == 1:
+        provider = unique_providers[0]
+    else:
+        provider = "+".join(unique_providers)
+
+    return {
+        "text": " ".join(text_chunks).strip(),
+        "language": language,
+        "segments": merged_segments,
+        "duration": duration,
+        "transcription_provider": provider,
+    }
 
 
 def _maybe_translate_transcript(

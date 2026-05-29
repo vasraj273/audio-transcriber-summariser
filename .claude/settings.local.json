@@ -26,7 +26,8 @@
       "Bash(grep -iE \"error|fail|syntax|\\\\\\\\*\\\\\\\\*\\\\\\\\*\")",
       "Bash(python -m compileall main.py routes services)",
       "Bash(python -m compileall services/supabase_service.py)",
-      "Bash(python -m compileall services/groq_service.py routes/process.py)"
+      "Bash(python -m compileall services/groq_service.py routes/process.py)",
+      "Bash(python -m py_compile routes/process.py services/gemini_service.py services/groq_service.py services/audio_split_service.py)"
     ]
   }
 }

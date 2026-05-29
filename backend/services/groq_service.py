@@ -139,6 +139,38 @@ def transcribe_audio(file_path: str) -> dict:
     }
 
 
+def build_context_memory(transcript_so_far: str) -> str:
+    """Distil a SHORT continuity memo from the transcript accumulated so far,
+    used to prime the next sequential audio part's transcription. Soft-fails
+    to an empty string so a Llama outage never blocks the pipeline."""
+    text = (transcript_so_far or "").strip()
+    if not text:
+        return ""
+
+    prompt = f"""You are tracking context across a long recording being transcribed in sequential parts.
+From the transcript so far, write a SHORT memo (max ~120 words) that helps transcribe the NEXT part consistently.
+
+Include only what aids continuity:
+- TOPIC: what the conversation is about
+- SPEAKERS: each label with name/role if identifiable (e.g. "Speaker 1 = Alex, sales rep")
+- TERMINOLOGY: proper nouns, product names, jargon, acronyms spelled as used
+- STATE: what is being discussed at the cut point
+
+Transcript so far:
+\"\"\"
+{text[:12000]}
+\"\"\"
+
+Return only the memo as plain lines. No preface, no markdown headers."""
+
+    try:
+        raw = _llama_complete([{"role": "user", "content": prompt}], temperature=0.2)
+        return (raw or "").strip()
+    except Exception as exc:
+        logger.warning("build_context_memory failed (%s); next part runs without context.", exc)
+        return ""
+
+
 def assess_transcription_quality(transcription: dict) -> dict:
     text = (transcription.get("text") or "").strip()
     segments = transcription.get("segments") or []
