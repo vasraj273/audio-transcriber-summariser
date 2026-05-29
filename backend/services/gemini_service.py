@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 import re
@@ -13,15 +12,23 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "gemini-2.0-flash"
+# 2.5 Flash gives transcription quality on par with the Gemini app, far
+# better than 2.0 Flash for diarized verbatim speech. Override with
+# GEMINI_TRANSCRIBE_MODEL if needed.
+_MODEL = os.getenv("GEMINI_TRANSCRIBE_MODEL", "gemini-2.5-flash")
 _configured = False
 
-# MIME type lookup for the formats the upload pipeline already validates.
+# Gemini's documented audio MIME types. m4a (AAC-in-MP4) is sent as audio/aac
+# which the File API accepts; mislabelling as audio/mp4 gets rejected.
 _MIME_BY_EXT = {
     ".mp3": "audio/mp3",
     ".wav": "audio/wav",
-    ".m4a": "audio/mp4",
+    ".m4a": "audio/aac",
 }
+
+# Average speaking rate used only to synthesise plausible segment timestamps
+# when the model is asked for a clean verbatim transcript (no timestamps).
+_WORDS_PER_SECOND = 2.6
 
 
 def _ensure_configured() -> None:
@@ -35,27 +42,40 @@ def _ensure_configured() -> None:
         )
     genai.configure(api_key=api_key)
     _configured = True
-    logger.info("Gemini configured (key length=%d).", len(api_key))
+    logger.info("Gemini configured (key length=%d, model=%s).", len(api_key), _MODEL)
 
 
-_PROMPT = """You are a precise speech-to-text engine. Transcribe the supplied audio.
+# Plain-text transcription prompt. No JSON, no timestamps — this is what makes
+# Gemini transcribe verbatim at app-level quality instead of looping/blobbing.
+_PROMPT = """You are a professional audio transcriptionist. Transcribe the attached audio recording completely and accurately.
 
-Rules:
-- Transcribe verbatim. Do NOT summarise, translate, or add commentary.
-- Detect distinct speakers and label them "Speaker 1", "Speaker 2", etc. Keep labels consistent across the whole call.
-- Split the transcript into segments at every speaker change or natural sentence boundary.
-- Give approximate start and end timestamps in SECONDS (numbers) for each segment, based on audio position.
-- Detect the spoken language and return its ISO 639-1 code (e.g. "en", "es", "hi").
+Strict rules:
+- Transcribe VERBATIM, word for word. Do not summarise, paraphrase, translate, or omit anything.
+- Write in the ORIGINAL spoken language. Never translate to English.
+- Use correct, natural punctuation and capitalisation for that language.
+- Identify each distinct speaker. Start every speaker turn on a new line, prefixed with a consistent label: "Speaker 1:", "Speaker 2:", etc. Keep the same label for the same voice throughout.
+- If there is clearly only one speaker, label every line "Speaker 1:".
+- Put each speaker turn (or each natural sentence within a long turn) on its own line.
+- Do NOT repeat words or lines. Do NOT pad or loop. Transcribe each moment of audio exactly once.
+- Do NOT add timestamps, headers, notes, or commentary. Output only the transcript lines.
 
-Return ONLY valid JSON, no markdown fences, in exactly this shape:
-{
-  "language": "<iso code>",
-  "segments": [
-    {"start": 0.0, "end": 4.2, "speaker": "Speaker 1", "text": "..."}
-  ]
-}
-If there is no intelligible speech, return {"language": "unknown", "segments": []}.
-"""
+Before the transcript, output a single first line in the exact form:
+LANG: <ISO 639-1 code of the spoken language, e.g. en, es, hi, fr>
+
+Then the transcript, starting on the next line. If there is no intelligible speech, output only:
+LANG: unknown"""
+
+
+def _wait_until_active(uploaded, timeout_s: float = 30.0):
+    """Poll the uploaded File until it leaves PROCESSING. Generating before the
+    file is ACTIVE yields empty/garbage transcripts."""
+    deadline = time.time() + timeout_s
+    while getattr(uploaded.state, "name", str(uploaded.state)) == "PROCESSING":
+        if time.time() > deadline:
+            break
+        time.sleep(1.0)
+        uploaded = genai.get_file(uploaded.name)
+    return uploaded
 
 
 def transcribe_audio(file_path: str) -> dict:
@@ -63,17 +83,25 @@ def transcribe_audio(file_path: str) -> dict:
 
     started = time.perf_counter()
     ext = os.path.splitext(file_path)[1].lower()
-    mime = _MIME_BY_EXT.get(ext, "audio/mpeg")
+    mime = _MIME_BY_EXT.get(ext, "audio/mp3")
 
     uploaded = None
     try:
         uploaded = genai.upload_file(path=file_path, mime_type=mime)
+        uploaded = _wait_until_active(uploaded)
+        if getattr(uploaded.state, "name", str(uploaded.state)) == "FAILED":
+            raise RuntimeError("Gemini File API failed to process the audio upload.")
+
         model = genai.GenerativeModel(_MODEL)
         response = model.generate_content(
             [_PROMPT, uploaded],
-            generation_config={"temperature": 0.0, "response_mime_type": "application/json"},
+            generation_config={
+                "temperature": 0.0,
+                "top_p": 0.95,
+                "max_output_tokens": 8192,
+            },
         )
-        raw = response.text or ""
+        raw = (response.text or "")
     except Exception as exc:
         logger.exception("Gemini transcription failed.")
         record_api_call(
@@ -93,13 +121,7 @@ def transcribe_audio(file_path: str) -> dict:
             except Exception:
                 pass
 
-    parsed = _safe_extract_json_object(raw)
-    language = "unknown"
-    segments = []
-    if parsed:
-        language = (parsed.get("language") or "unknown").strip() or "unknown"
-        segments = _normalise_segments(parsed.get("segments"))
-
+    language, segments = _parse_transcript(raw)
     text = " ".join(seg["text"] for seg in segments).strip()
     duration = max((seg["end"] for seg in segments), default=0.0)
 
@@ -124,66 +146,58 @@ def transcribe_audio(file_path: str) -> dict:
     }
 
 
-def _normalise_segments(raw_segments) -> list:
-    if not isinstance(raw_segments, list):
-        return []
-    segments = []
-    fallback_clock = 0.0
-    for item in raw_segments:
-        if not isinstance(item, dict):
-            continue
-        text = str(item.get("text", "")).strip()
-        if not text:
-            continue
-        start = _to_float(item.get("start"), fallback_clock)
-        end = _to_float(item.get("end"), start + 3.0)
-        if end < start:
-            end = start
-        fallback_clock = end
-        segments.append({
-            "start": round(start, 3),
-            "end": round(end, 3),
-            "text": text,
-            "speaker": _speaker_label(item.get("speaker")),
-        })
-    return segments
+_SPEAKER_LINE = re.compile(r"^\s*speaker\s*([0-9]+)\s*[:\-]\s*(.*)$", re.IGNORECASE)
 
 
-def _to_float(value, default: float) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default)
-
-
-def _speaker_label(raw_speaker) -> str:
-    if raw_speaker is None or raw_speaker == "":
-        return "Speaker 1"
-    raw = str(raw_speaker).strip()
-    digits = "".join(ch for ch in raw if ch.isdigit())
-    if digits:
-        return f"Speaker {int(digits)}"
-    if len(raw) == 1 and raw.isalpha():
-        return f"Speaker {ord(raw.upper()) - ord('A') + 1}"
-    return "Speaker 1"
-
-
-def _safe_extract_json_object(raw: str) -> dict | None:
+def _parse_transcript(raw: str) -> tuple[str, list]:
+    """Parse the LANG header + speaker-labelled lines into the segment schema.
+    Synthesises monotonically increasing timestamps from speech rate so the
+    audio player and downstream speaker logic keep working."""
     if not raw:
-        return None
-    text = raw.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```[a-zA-Z0-9]*\n?", "", text)
-        text = re.sub(r"\n?```$", "", text)
-    start = text.find("{")
-    end = text.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        return None
-    try:
-        data = json.loads(text[start : end + 1])
-    except Exception:
-        return None
-    return data if isinstance(data, dict) else None
+        return "unknown", []
+
+    lines = raw.replace("\r\n", "\n").split("\n")
+    language = "unknown"
+    body_lines = []
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not body_lines and stripped.upper().startswith("LANG:"):
+            code = stripped.split(":", 1)[1].strip().lower()
+            language = re.sub(r"[^a-z\-]", "", code) or "unknown"
+            body_lines = lines[i + 1:]
+            break
+    else:
+        body_lines = lines
+
+    segments = []
+    clock = 0.0
+    current_speaker = "Speaker 1"
+
+    for line in body_lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        match = _SPEAKER_LINE.match(stripped)
+        if match:
+            current_speaker = f"Speaker {int(match.group(1))}"
+            content = match.group(2).strip()
+        else:
+            content = stripped
+        if not content:
+            continue
+        duration = max(1.0, len(content.split()) / _WORDS_PER_SECOND)
+        start = round(clock, 3)
+        end = round(clock + duration, 3)
+        clock = end
+        segments.append({
+            "start": start,
+            "end": end,
+            "text": content,
+            "speaker": current_speaker,
+        })
+
+    return language, segments
 
 
 def _is_rate_limited(err) -> bool:
