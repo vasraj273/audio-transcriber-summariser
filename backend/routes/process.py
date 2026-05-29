@@ -3,7 +3,7 @@ import os
 import tempfile
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from models.schemas import ProcessResponse
-from services.assemblyai_service import transcribe_audio as assemblyai_transcribe_audio
+from services.gemini_service import transcribe_audio as gemini_transcribe_audio
 from services.groq_service import (
     _build_speaker_transcript,
     analyze_sales_call,
@@ -136,24 +136,29 @@ def process_audio_file(file_path: str, options: dict) -> dict:
 def _transcribe_with_fallback(file_path: str) -> dict:
     logger.info("Transcription pipeline starting for %s.", os.path.basename(file_path))
     try:
-        result = assemblyai_transcribe_audio(file_path)
-        result["transcription_provider"] = "assemblyai"
-        return result
+        result = gemini_transcribe_audio(file_path)
+        if (result.get("text") or "").strip():
+            result["transcription_provider"] = "gemini"
+            return result
+        logger.warning("Gemini returned empty transcript. Falling back to Groq Whisper.")
+        last_error = "empty transcript"
     except Exception as exc:
         logger.warning(
-            "AssemblyAI transcription failed (%s). Falling back to Groq Whisper.",
+            "Gemini transcription failed (%s). Falling back to Groq Whisper.",
             exc,
         )
-        try:
-            result = groq_transcribe_audio(file_path)
-            result["transcription_provider"] = "groq_whisper"
-            logger.info("Groq Whisper fallback transcription succeeded.")
-            return result
-        except Exception as fallback_exc:
-            logger.exception("Both AssemblyAI and Groq Whisper transcription failed.")
-            raise RuntimeError(
-                f"Transcription failed. AssemblyAI error: {exc}. Groq Whisper fallback error: {fallback_exc}."
-            ) from fallback_exc
+        last_error = exc
+
+    try:
+        result = groq_transcribe_audio(file_path)
+        result["transcription_provider"] = "groq_whisper"
+        logger.info("Groq Whisper fallback transcription succeeded.")
+        return result
+    except Exception as fallback_exc:
+        logger.exception("Both Gemini and Groq Whisper transcription failed.")
+        raise RuntimeError(
+            f"Transcription failed. Gemini error: {last_error}. Groq Whisper fallback error: {fallback_exc}."
+        ) from fallback_exc
 
 
 def _maybe_translate_transcript(
