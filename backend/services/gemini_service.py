@@ -53,7 +53,8 @@ Strict rules:
 - Transcribe VERBATIM, word for word. Do not summarise, paraphrase, translate, or omit anything.
 - Write in the ORIGINAL spoken language. Never translate to English.
 - Use correct, natural punctuation and capitalisation for that language.
-- Identify each distinct speaker. Start every speaker turn on a new line, prefixed with a consistent label: "Speaker 1:", "Speaker 2:", etc. Keep the same label for the same voice throughout.
+- Identify each distinct speaker by their voice. Start every speaker turn on a new line, prefixed with a consistent label: "Speaker 1:", "Speaker 2:", etc. Keep the SAME label for the SAME voice throughout the entire recording — never renumber the same person.
+- A two-person phone call must alternate between exactly "Speaker 1:" and "Speaker 2:". Do not collapse a multi-speaker conversation into a single speaker.
 - If there is clearly only one speaker, label every line "Speaker 1:".
 - Put each speaker turn (or each natural sentence within a long turn) on its own line.
 - Do NOT repeat words or lines. Do NOT pad or loop. Transcribe each moment of audio exactly once.

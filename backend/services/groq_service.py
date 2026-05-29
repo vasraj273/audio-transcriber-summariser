@@ -93,6 +93,11 @@ def transcribe_audio(file_path: str) -> dict:
                 file=audio_file,
                 response_format="verbose_json",
                 timestamp_granularities=["segment"],
+                # temperature=0 + an anti-repeat prompt curb whisper-large-v3's
+                # tendency to loop and to drift Hinglish speech into English on
+                # long audio. Keeps the source language verbatim.
+                temperature=0,
+                prompt="Hinglish business phone call between multiple speakers. Transcribe verbatim in the original spoken language (mixed Hindi/English). Do not translate to English. Do not repeat lines.",
             )
     except Exception as exc:
         record_api_call(

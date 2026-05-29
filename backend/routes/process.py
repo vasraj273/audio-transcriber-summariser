@@ -317,24 +317,40 @@ def _maybe_translate_transcript(
 def _resolve_speakers(transcription: dict) -> dict:
     segments = transcription.get("segments") or []
     text = transcription.get("text") or ""
+    provider = transcription.get("transcription_provider") or ""
 
-    has_native_speakers = any((segment.get("speaker") or "").strip() for segment in segments)
+    labelled = [(segment.get("speaker") or "").strip() for segment in segments]
+    all_labelled = bool(segments) and all(labelled)
+    # A "+"-joined provider means parts came from different engines (e.g.
+    # gemini+groq_whisper); the Groq parts carry no speaker labels, so the
+    # per-part numbering can't be trusted as one consistent diarization.
+    mixed_providers = "+" in provider
 
-    if has_native_speakers:
-        labels = {segment["speaker"] for segment in segments if segment.get("speaker")}
+    # Trust native Gemini labels ONLY when every segment is labelled AND the
+    # whole transcript came from a single engine. Otherwise (any unlabelled
+    # segment, or a mixed gemini/groq merge) re-infer over the full timeline
+    # so the Groq sections don't silently collapse to "Speaker 1".
+    if all_labelled and not mixed_providers:
+        unique = {label for label in labelled if label}
         return {
             "speaker_transcript": _build_speaker_transcript(segments),
-            "speaker_count": max(len(labels), 1),
+            "speaker_count": max(len(unique), 1),
             "segments": segments,
         }
 
     try:
-        return infer_speakers(text, segments)
+        # Strip part-local labels first so inference re-diarizes the merged
+        # timeline globally instead of anchoring on inconsistent numbering.
+        clean_segments = [
+            {key: value for key, value in segment.items() if key != "speaker"}
+            for segment in segments
+        ]
+        return infer_speakers(text, clean_segments)
     except Exception:
         return {
-            "speaker_transcript": text,
-            "speaker_count": 1,
-            "segments": [{**segment, "speaker": "Speaker 1"} for segment in segments],
+            "speaker_transcript": _build_speaker_transcript(segments) if all_labelled else text,
+            "speaker_count": max(len({l for l in labelled if l}), 1),
+            "segments": [{**segment, "speaker": segment.get("speaker") or "Speaker 1"} for segment in segments],
         }
 
 
