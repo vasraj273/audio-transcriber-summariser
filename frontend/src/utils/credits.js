@@ -6,7 +6,14 @@ export const CREDIT_RULES = {
   plan: "free",
 };
 
+// Global kill-switch. Set VITE_DISABLE_CREDITS=true to disable all credit
+// gating (no insufficient-credit blocking, no deduction). Reversible by
+// removing/flipping the env var alone — no code change. Architecture intact.
+export const CREDITS_DISABLED =
+  import.meta.env.VITE_DISABLE_CREDITS === "true";
+
 export function computeRequiredCredits(durationSeconds, rules = CREDIT_RULES) {
+  if (CREDITS_DISABLED) return 0;
   const seconds = Math.max(0, Number(durationSeconds) || 0);
   if (seconds === 0) return 0;
   const minutes = seconds / 60;
