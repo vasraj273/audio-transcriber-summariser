@@ -192,17 +192,48 @@ def _transcribe_parts_sequential(parts: list) -> dict:
     return _merge_transcriptions(results)
 
 
+# Fragments that only appear in transcription INSTRUCTIONS, never in genuine
+# call speech. Whisper (and occasionally Gemini) parrots these back on
+# silent/low-speech audio; we detect and discard such echoes.
+_PROMPT_ECHO_MARKERS = (
+    "transcribe verbatim",
+    "original spoken language",
+    "do not translate",
+    "do not repeat",
+    "audio transcriptionist",
+    "speaker turn on a new line",
+)
+
+
+def _is_prompt_echo(text: str) -> bool:
+    """True when the model regurgitated its own instructions instead of
+    transcribing. Echoes are short and contain instruction-only phrasing."""
+    cleaned = (text or "").strip().lower()
+    if not cleaned:
+        return False
+    if any(marker in cleaned for marker in _PROMPT_ECHO_MARKERS):
+        # Real speech rarely contains these phrases; when it does, it's buried
+        # in a long transcript. A short blob that hits a marker is an echo.
+        return len(cleaned) < 400
+    return False
+
+
 def _transcribe_part(file_path: str, context: str = "") -> dict:
     """Gemini primary (context-aware) with Groq Whisper fallback for a single
     file — whole audio or one split part. Groq has no context channel, so a
     fallback part relies on post-merge speaker inference."""
     try:
         result = gemini_transcribe_audio(file_path, context=context)
-        if (result.get("text") or "").strip():
+        text = (result.get("text") or "").strip()
+        if text and not _is_prompt_echo(text):
             result["transcription_provider"] = "gemini"
             return result
-        logger.warning("Gemini returned empty transcript. Falling back to Groq Whisper.")
-        last_error = "empty transcript"
+        if text:
+            logger.warning("Gemini output looks like a prompt echo. Falling back to Groq Whisper.")
+            last_error = "prompt echo"
+        else:
+            logger.warning("Gemini returned empty transcript. Falling back to Groq Whisper.")
+            last_error = "empty transcript"
     except Exception as exc:
         logger.warning(
             "Gemini transcription failed (%s). Falling back to Groq Whisper.",
@@ -212,6 +243,11 @@ def _transcribe_part(file_path: str, context: str = "") -> dict:
 
     try:
         result = groq_transcribe_audio(file_path)
+        if _is_prompt_echo(result.get("text") or ""):
+            # Whisper parroted instructions on near-silent audio. Treat as
+            # empty so it never reaches the user; merge drops this part.
+            logger.warning("Groq Whisper output looks like a prompt echo; discarding as empty.")
+            return {"text": "", "language": "unknown", "segments": [], "duration": result.get("duration", 0), "transcription_provider": "groq_whisper"}
         result["transcription_provider"] = "groq_whisper"
         logger.info("Groq Whisper fallback transcription succeeded.")
         return result
