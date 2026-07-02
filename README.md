@@ -34,7 +34,6 @@ Powered by Google Gemini + Groq, with a Telegram bot and an evolving **SalesCall
 <div align="center">
   <img src="docs/demo.gif" alt="Audio Transcriber & Summariser demo" width="720" />
   <br />
-  <sub><i>Replace <code>docs/demo.gif</code> with a real screenshot or demo recording.</i></sub>
 </div>
 
 ---
